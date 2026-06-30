@@ -43,7 +43,7 @@ const initialState = {
   salesProduct:"", salesTarget:"", salesProspects:[], salesRunning:false,
   salesEmailDrafts:{}, salesSentEmails:{},
   supportDocs:"", supportKB:[], supportChats:[], supportBuilding:false,
-  crossEvents:[], smbProfile:null, warRoomLogs:{}, dynamicScores:{}, dynamicReasons:{},
+  crossEvents:[], smbProfile:null, warRoomLogs:{}, dynamicScores:{}, dynamicReasons:{}, darkMode:false, hindiMode:false,
   interviewMode:null, customQuestions:"", interviewDecisionOpen:false,
   activeCandidates:CANDIDATE_POOL.slice(0,5), roleDomain:"general",
   candidateDecisions:{}, submittedResumes:[], resumeScoring:false,
@@ -104,6 +104,8 @@ function reducer(s,a){
     case "CLOSE_INTERVIEW_DECISION": return{...s,interviewDecisionOpen:false};
     case "ADD_CROSS_EVENT": return{...s,crossEvents:[a.event,...s.crossEvents].slice(0,20)};
     case "SET_SMB_PROFILE": return{...s,smbProfile:a.payload};
+    case "TOGGLE_DARK": return{...s,darkMode:!s.darkMode};
+    case "TOGGLE_HINDI": return{...s,hindiMode:!s.hindiMode};
     case "ADD_WAR_ROOM_LOG": return{...s,warRoomLogs:{...s.warRoomLogs,[a.agentId]:[...(s.warRoomLogs[a.agentId]||[]),a.log]}};
     case "SET_DB_RUN_ID": return{...s,dbRunId:a.payload};
     default: return s;
@@ -146,12 +148,14 @@ function useVoiceInput({onResult,onInterim,lang="en-IN"}){
   return{listening,supported,toggle,stop};
 }
 
-function VoiceMicBtn({onResult,lang="en-IN",style={}}){
+function VoiceMicBtn({onResult,lang,style={}}){
+  const{state}=useStore();
+  const activeLang=lang||(state.hindiMode?"hi-IN":"en-IN");
   const[interim,setInterim]=useState("");
   const{listening,supported,toggle}=useVoiceInput({
     onResult:(t)=>onResult(t),
     onInterim:setInterim,
-    lang,
+    lang:activeLang,
   });
   if(!supported) return null;
   return(
@@ -180,11 +184,14 @@ function VoiceMicBtn({onResult,lang="en-IN",style={}}){
 
 const GROQ_API_KEY=import.meta.env.VITE_GROQ_API_KEY||"";
 const GROQ_MODEL="llama-3.3-70b-versatile";
+let HINDI_MODE=false; // synced from React state by HindiSync component
+const HINDI_SUFFIX="\n\nमहत्वपूर्ण: अपना पूरा जवाब हिंदी में दें (देवनागरी लिपि)। सरल, रोज़मर्रा की हिंदी का इस्तेमाल करें जो भारतीय व्यापारी आसानी से समझ सकें।";
 
 // Non-streaming (used for structured JSON responses)
 async function callClaude(messages,system=""){
   try{
-    const groqMessages=system?[{role:"system",content:system},...messages]:messages;
+    const sys=(HINDI_MODE&&!system.includes("JSON"))?system+HINDI_SUFFIX:system;
+    const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
     const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+GROQ_API_KEY},
@@ -198,7 +205,8 @@ async function callClaude(messages,system=""){
 // Real SSE streaming — onChunk(accumulatedText, newToken)
 async function callClaudeStream(messages,system="",onChunk){
   try{
-    const groqMessages=system?[{role:"system",content:system},...messages]:messages;
+    const sys=HINDI_MODE?(system+HINDI_SUFFIX):system;
+    const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
     const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
       method:"POST",
       headers:{"Content-Type":"application/json","Authorization":"Bearer "+GROQ_API_KEY},
@@ -443,6 +451,16 @@ function HomeScreen(){
               <div style={{width:6,height:6,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px rgba(34,197,94,0.25)",animation:"pulse 2s infinite"}}/>
               <span style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.7)",letterSpacing:"0.06em"}}>ALL SYSTEMS ONLINE</span>
             </div>
+            <button onClick={()=>dispatch({type:"TOGGLE_HINDI"})}
+              title={state.hindiMode?"Switch to English":"Switch to Hindi / हिंदी"}
+              style={{padding:"7px 12px",background:state.hindiMode?"rgba(124,58,237,0.5)":"rgba(255,255,255,0.07)",border:"1px solid "+(state.hindiMode?"rgba(124,58,237,0.8)":"rgba(255,255,255,0.15)"),borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",color:"white",transition:"all 0.2s"}}>
+              {state.hindiMode?"अ EN":"अ HI"}
+            </button>
+            <button onClick={()=>dispatch({type:"TOGGLE_DARK"})}
+              title={state.darkMode?"Light mode":"Dark mode"}
+              style={{padding:"7px 10px",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:20,fontSize:13,cursor:"pointer",transition:"all 0.15s"}}>
+              {state.darkMode?"☀️":"🌙"}
+            </button>
             <button onClick={()=>dispatch({type:"SET_MODE",payload:"overview"})}
               style={{padding:"7px 16px",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,0.8)",transition:"all 0.15s"}}
               onMouseEnter={e=>{e.currentTarget.style.background="rgba(109,95,250,0.25)";e.currentTarget.style.borderColor="rgba(109,95,250,0.6)";e.currentTarget.style.color="white";}}
@@ -2771,6 +2789,13 @@ function SalesMode(){
                   }} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:7,cursor:"pointer",color:"#1D4ED8",display:"flex",alignItems:"center",gap:4}}>
                     <span>in</span> LinkedIn
                   </button>}
+                  {draft&&<button onClick={()=>{
+                    const msg=encodeURIComponent("Hi "+p.name.split(" ")[0]+"! 👋\n\n"+draft.slice(0,400)+"...\n\n— FlowZint AI");
+                    window.open("https://wa.me/?text="+msg,"_blank");
+                    toast("Opening WhatsApp with message for "+p.name.split(" ")[0],"success");
+                  }} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"#DCFCE7",border:"1px solid #86EFAC",borderRadius:7,cursor:"pointer",color:"#15803D",display:"flex",alignItems:"center",gap:4}}>
+                    <span>📲</span> WhatsApp
+                  </button>}
                   {sent?<Tag color="success">Sent</Tag>:<Btn variant="orange" size="sm" onClick={()=>{dispatch({type:"SET_SALES_SENT",id:p.id});toast("Sent to "+p.name,"success");}}>Send</Btn>}
                 </div>
               </div>
@@ -3172,8 +3197,15 @@ function CareMode(){
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:12,fontWeight:800,color:"#1C1C1A",display:"flex",alignItems:"center",gap:6}}>AI draft <Tag color="warn">Review before sending</Tag></div>
                 <textarea value={responses[selected.id]} onChange={e=>setResponses(r=>({...r,[selected.id]:e.target.value}))} style={{width:"100%",height:180,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} onFocus={e=>e.target.style.borderColor="#D4537E"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
-                <div style={{display:"flex",gap:8}}>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <Btn variant="secondary" onClick={()=>genResponse(selected)} disabled={generating===selected.id}>Regenerate</Btn>
+                  {responses[selected.id]&&<button onClick={()=>{
+                    const msg=encodeURIComponent("नमस्ते "+selected.customer.split(" ")[0]+"! 🙏\n\n"+responses[selected.id].slice(0,500)+"\n\n— "+selected.company+" Support via FlowZint AI");
+                    window.open("https://wa.me/?text="+msg,"_blank");
+                    toast("Opening WhatsApp for "+selected.customer,"success");
+                  }} style={{fontSize:11,fontWeight:700,padding:"7px 14px",background:"#DCFCE7",border:"1px solid #86EFAC",borderRadius:9,cursor:"pointer",color:"#15803D",display:"flex",alignItems:"center",gap:6}}>
+                    📲 Send on WhatsApp
+                  </button>}
                   <Btn variant="pink" fullWidth disabled={approved[selected.id]} onClick={()=>{
                     setApproved(a=>({...a,[selected.id]:true}));
                     saveCareTicket({ticket:selected,toneUsed:tone,aiResponse:responses[selected.id],approved:true});
@@ -3549,41 +3581,36 @@ function WarRoomMode(){
       (acc)=>{p0=acc;setPhaseResults(prev=>({...prev,0:"🤖 "+acc}));}
     );
 
-    // Phase 1: HireFlow agent run — real AI
-    setPhase(1);
-    let p1="";
-    await callClaudeStream(
-      [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD"}\n\nReport your hiring pipeline status in 2 sentences: what you found, who's ranked top, and one risk.`}],
-      "HireFlow agent. Data-driven. Reference actual candidate names and scores. 60 words max.",
-      (acc)=>{p1=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));}
-    );
-
-    // Phase 2: SalesFlow agent — real AI
-    setPhase(2);
-    let p2="";
-    await callClaudeStream(
-      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\nProspect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint,budget:topProspect.budget}):"No prospects generated yet"}\n\nReport your sales pipeline status in 2 sentences: prospects scored, top pick, and next action.`}],
-      "SalesFlow agent. Specific, numbers-driven. Reference actual prospect names. 60 words max.",
-      (acc)=>{p2=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));}
-    );
-
-    // Phase 3: SupportFlow agent — real AI
-    setPhase(3);
-    let p3="";
-    await callClaudeStream(
-      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample questions: "+state.supportKB.slice(0,2).map(k=>k.q).join("; "):"No KB built yet"}\n\nReport your support readiness in 2 sentences: what's indexed, escalation patterns detected, and chat bot status.`}],
-      "SupportFlow agent. Specific. Mention actual KB content if available. 60 words max.",
-      (acc)=>{p3=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));}
-    );
-
-    // Phase 4: CareFlow agent — real AI
-    setPhase(4);
-    let p4="";
-    await callClaudeStream(
-      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\nTicket queue: 5 tickets — 1 billing dispute (Raj Patel, urgent), 1 tech issue (Priya Nair, high), 1 upsell opportunity (Amir Khan, normal), 1 login issue (Sunita Rao, high), 1 positive feedback (Vikram Singh, low).\n\nReport your triage status in 2 sentences: tickets processed, urgency ranking, upsell detected.`}],
-      "CareFlow agent. Specific about ticket names and priorities. 60 words max.",
-      (acc)=>{p4=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));}
-    );
+    // Phases 1-4: ALL 4 agents run in PARALLEL simultaneously
+    setPhase("parallel");
+    setPhaseResults(prev=>({...prev,1:"🧠 ...",2:"🎯 ...",3:"💬 ...",4:"❤️ ..."}));
+    toast("⚡ All 4 AI agents activated simultaneously","info");
+    const [p1,p2,p3,p4]=await Promise.all([
+      // HireFlow agent
+      (async()=>{let t="";await callClaudeStream(
+        [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD"}\n\nReport your hiring pipeline status in 2 sentences: what you found, who's ranked top, and one risk.`}],
+        "HireFlow agent. Data-driven. Reference actual candidate names and scores. 60 words max.",
+        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));}
+      );return t;})(),
+      // SalesFlow agent
+      (async()=>{let t="";await callClaudeStream(
+        [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\nProspect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint,budget:topProspect.budget}):"No prospects generated yet"}\n\nReport your sales pipeline status in 2 sentences: prospects scored, top pick, and next action.`}],
+        "SalesFlow agent. Specific, numbers-driven. Reference actual prospect names. 60 words max.",
+        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));}
+      );return t;})(),
+      // SupportFlow agent
+      (async()=>{let t="";await callClaudeStream(
+        [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample questions: "+state.supportKB.slice(0,2).map(k=>k.q).join("; "):"No KB built yet"}\n\nReport your support readiness in 2 sentences: what's indexed, escalation patterns detected, and chat bot status.`}],
+        "SupportFlow agent. Specific. Mention actual KB content if available. 60 words max.",
+        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));}
+      );return t;})(),
+      // CareFlow agent
+      (async()=>{let t="";await callClaudeStream(
+        [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\nTicket queue: 5 tickets — 1 billing dispute (Raj Patel, urgent), 1 tech issue (Priya Nair, high), 1 upsell opportunity (Amir Khan, normal), 1 login issue (Sunita Rao, high), 1 positive feedback (Vikram Singh, low).\n\nReport your triage status in 2 sentences: tickets processed, urgency ranking, upsell detected.`}],
+        "CareFlow agent. Specific about ticket names and priorities. 60 words max.",
+        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));}
+      );return t;})(),
+    ]);
 
     // Phase 5: Cross-agent debates
     setPhase(5);
@@ -3655,9 +3682,17 @@ function WarRoomMode(){
         {/* Phases */}
         <Card style={{padding:16}}>
           <div style={{fontSize:12,fontWeight:800,color:"#374151",marginBottom:12,letterSpacing:"-0.01em"}}>Mission phases</div>
+          {/* Parallel agents badge */}
+          {(phase==="parallel"||(phase>0&&phase<5))&&(
+            <div style={{marginBottom:10,padding:"6px 10px",background:"linear-gradient(135deg,#EDE9FE,#F5F3FF)",border:"1.5px solid #A78BFA",borderRadius:9,display:"flex",alignItems:"center",gap:8}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:"#8B5CF6",animation:"pulse 0.6s infinite",flexShrink:0}}/>
+              <div style={{fontSize:10,fontWeight:800,color:"#6D28D9"}}>⚡ 4 agents running in parallel</div>
+            </div>
+          )}
           {PHASES.map(p=>{
-            const isDone=phase>p.id;
-            const isActive=phase===p.id&&running;
+            const isParallelPhase=p.id>=1&&p.id<=4;
+            const isDone=phase==="parallel"?false:typeof phase==="number"&&(phase>p.id||(phase>4&&isParallelPhase));
+            const isActive=(phase===p.id&&running)||(phase==="parallel"&&isParallelPhase&&running);
             const result=phaseResults[p.id];
             return(
               <div key={p.id} style={{padding:"9px 0",borderBottom:p.id<6?"1px solid #F9FAFB":"none"}}>
@@ -3666,15 +3701,18 @@ function WarRoomMode(){
                     {isDone?"✓":isActive?<div style={{width:6,height:6,borderRadius:"50%",background:"#8B5CF6",animation:"pulse 1s infinite"}}/>:p.icon}
                   </div>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:11,fontWeight:600,color:isDone?"#374151":isActive?"#6D5FFA":"#9CA3AF"}}>{p.title}</div>
+                    <div style={{fontSize:11,fontWeight:600,color:isDone?"#374151":isActive?"#6D5FFA":"#9CA3AF"}}>{p.title}{isParallelPhase&&(phase==="parallel")?" ⚡":""}</div>
                     {isActive&&<div style={{fontSize:9,color:"#8B5CF6",marginTop:1}}>{p.desc}</div>}
                   </div>
                   {isDone&&!result&&<span style={{fontSize:9,fontWeight:700,color:"#16A34A",background:"#F0FDF4",border:"1px solid #86EFAC",borderRadius:20,padding:"2px 7px"}}>Done</span>}
                 </div>
-                {isDone&&result&&(
+                {result&&result!=="🧠 ..."&&result!=="🎯 ..."&&result!=="💬 ..."&&result!=="❤️ ..."&&(
                   <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}} style={{marginTop:6,marginLeft:36,padding:"6px 10px",background:"#F0FDF4",borderRadius:8,border:"1px solid #BBF7D0",borderLeft:"3px solid #16A34A"}}>
                     <div style={{fontSize:9.5,color:"#15803D",lineHeight:1.5,fontWeight:500}}>{result}</div>
                   </motion.div>
+                )}
+                {isActive&&result&&(result==="🧠 ..."||result==="🎯 ..."||result==="💬 ..."||result==="❤️ ...")&&(
+                  <div style={{marginTop:4,marginLeft:36,fontSize:9,color:"#8B5CF6"}}>Generating...</div>
                 )}
               </div>
             );
@@ -3895,7 +3933,7 @@ function HiringShell(){
 }
 
 function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
-  const{dispatch}=useStore();
+  const{state,dispatch}=useStore();
   return(
     <header style={{background:"white",borderBottom:"1px solid #F3F4F6",padding:"12px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 6px rgba(0,0,0,0.06)"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -3916,6 +3954,16 @@ function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
         <span style={{fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:20,background:color+"14",color:color,border:"1px solid "+color+"30"}}>{tag}</span>
+        <button onClick={()=>dispatch({type:"TOGGLE_HINDI"})}
+          title={state.hindiMode?"Switch to English":"Switch to Hindi"}
+          style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:8,border:"1px solid #E5E7EB",background:state.hindiMode?"#7C3AED":"#F9FAFB",color:state.hindiMode?"white":"#6B7280",cursor:"pointer",transition:"all 0.2s"}}>
+          {state.hindiMode?"अ EN":"अ HI"}
+        </button>
+        <button onClick={()=>dispatch({type:"TOGGLE_DARK"})}
+          title={state.darkMode?"Switch to Light mode":"Switch to Dark mode"}
+          style={{fontSize:13,padding:"6px 10px",borderRadius:8,border:"1px solid #E5E7EB",background:state.darkMode?"#1C1C1A":"#F9FAFB",color:state.darkMode?"white":"#6B7280",cursor:"pointer",transition:"all 0.2s"}}>
+          {state.darkMode?"☀️":"🌙"}
+        </button>
         <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
           style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}}
           onMouseEnter={e=>{e.currentTarget.style.borderColor="#6D5FFA";e.currentTarget.style.color="#6D5FFA";}}
@@ -4061,6 +4109,12 @@ function ApiKeyBanner(){
   );
 }
 
+function HindiSync(){
+  const{state}=useStore();
+  useEffect(()=>{HINDI_MODE=state.hindiMode;},[state.hindiMode]);
+  return null;
+}
+
 function AppDataLoader(){
   const{dispatch}=useStore();
   useEffect(()=>{
@@ -4087,9 +4141,12 @@ export default function App(){
   return(
     <Ctx.Provider value={{state,dispatch}}>
       <style>{GLOBAL_STYLES}</style>
+      <div style={{filter:state.darkMode?"invert(1) hue-rotate(180deg)":"none",minHeight:"100vh",transition:"filter 0.3s ease"}}>
       <ApiKeyBanner/>
+      <HindiSync/>
       <AppDataLoader/>
       <AppInner/>
+      </div>
     </Ctx.Provider>
   );
 }
