@@ -288,7 +288,7 @@ function setTTSEnabled(v){_ttsEnabled=v;if(!v&&window.speechSynthesis)window.spe
 function speak(text){
   if(!_ttsEnabled||!window.speechSynthesis)return;
   window.speechSynthesis.cancel();
-  const clean=text.replace(/[*_#`\[\]]/g,"").replace(/HANDOFF_TO_\w+:\s*.+/gi,"").replace(/⚡|🧠|🎯|💬|❤️|📋/g,"").trim().slice(0,300);
+  const clean=text.replace(/[*_#\[\]]/g,"").replace(/`/g,"").replace(/HANDOFF_TO_\w+:\s*.+/gi,"").replace(/[☀-➿]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDD00-\uDFFF]/g,"").trim().slice(0,300);
   if(!clean)return;
   const utt=new SpeechSynthesisUtterance(clean);
   // Chrome loads voices async — retry once if empty
@@ -3954,12 +3954,12 @@ Be specific to Indian SMB context — mention realistic numbers, Indian market c
             <div style={{fontSize:13,fontWeight:800,color:"#A5B4FC"}}>🔮 Predictive Intelligence</div>
             <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"#6B7280",cursor:"pointer",fontSize:16}}>×</button>
           </div>
-          {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:"#7C3AED",fontSize:13}}><Spinner/> AI is analyzing {(() => {try{return JSON.parse(localStorage.getItem("war_room_sessions")||"[]").length}catch{return 0}})()} past sessions + current run...</div>}
+          {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:"#7C3AED",fontSize:13}}><Spinner/> Analyzing past sessions + current run to predict what happens next...</div>}
           {result&&(
             <div style={{fontSize:12,color:"#C7D2FE",lineHeight:1.8}}>
               {result.split("\n").map((line,i)=>{
-                const isHeader=line.match(/^(TREND ANALYSIS|⚠️ RISK|📈 NEXT|🎯 RECOMMENDED|💡 SMART)/);
-                const isSub=line.match(/^- (Hiring|Sales|Support):/)||line.match(/^\d+\./);
+                const isHeader=line.startsWith("TREND ANALYSIS")||line.startsWith("RISK ALERT")||line.startsWith("NEXT 30")||line.startsWith("RECOMMENDED")||line.startsWith("SMART SCHED")||line.includes("RISK ALERT")||line.includes("NEXT 30 DAYS")||line.includes("RECOMMENDED ACTIONS")||line.includes("SMART SCHEDULING");
+                const isSub=(line.startsWith("- Hiring:")||line.startsWith("- Sales:")||line.startsWith("- Support:"))||/^\d+\./.test(line);
                 if(!line.trim())return<div key={i} style={{height:6}}/>;
                 if(isHeader)return<div key={i} style={{color:"#818CF8",fontWeight:800,fontSize:13,marginTop:12,marginBottom:4,padding:"4px 8px",background:"rgba(99,102,241,0.15)",borderRadius:6,borderLeft:"3px solid #6366F1"}}>{line}</div>;
                 if(isSub)return<div key={i} style={{color:"#A5B4FC",fontWeight:600,marginLeft:8,marginTop:2}}>{line}</div>;
@@ -4000,7 +4000,7 @@ function WarRoomMode(){
     loadMemory();
   },[]);
   const exportPDF=()=>{
-    const summary=(phaseResults[6]||"").replace(/^📋\s*/,"");
+    const summary=(phaseResults[6]||"").replace(/^\u{1F4CB}\s*/u,"");
     const candidates=state.activeCandidates?.length||0;
     const prospects=state.salesProspects?.length||0;
     const kb=state.supportKB?.length||0;
@@ -4100,6 +4100,7 @@ function WarRoomMode(){
          finishDebate(hid,ht);
          dispatch({type:"ADD_CROSS_EVENT",event:{type:"confidence_assist",title:"⚠️ HireFlow requested help",desc:`Low confidence (${pct}%) — SalesFlow provided context`,action:"Confidence boosted"}});
        }
+     }
     }
     const handoffMatch=p1.match(/HANDOFF_TO_SALES:\s*(.+)/i);
     const hireflowHandoff=handoffMatch?handoffMatch[1].replace(/\[|\]/g,"").trim():"";
@@ -4171,6 +4172,7 @@ function WarRoomMode(){
          finishDebate(hid,ht);
          dispatch({type:"ADD_CROSS_EVENT",event:{type:"confidence_assist",title:"⚠️ SalesFlow requested help",desc:`Low confidence (${pct}%) — SupportFlow provided context`,action:"Confidence boosted"}});
        }
+     }
     }
     const objMatch=p2.match(/HANDOFF_TO_SUPPORT:\s*(.+)/i);
     const salesHandoff=objMatch?objMatch[1].replace(/\[|\]/g,"").trim():"pricing concerns";
@@ -4226,6 +4228,7 @@ function WarRoomMode(){
          finishDebate(hid,ht);
          dispatch({type:"ADD_CROSS_EVENT",event:{type:"confidence_assist",title:"⚠️ SupportFlow requested help",desc:`Low confidence (${pct}%) — CareFlow provided context`,action:"Confidence boosted"}});
        }
+     }
     }
     const escalMatch=p3.match(/HANDOFF_TO_CARE:\s*(.+)/i);
     const supportHandoff=escalMatch?escalMatch[1].replace(/\[|\]/g,"").trim():"high-priority escalation";
@@ -4292,7 +4295,7 @@ function WarRoomMode(){
     speak("War Room complete. "+p6.slice(0,200));
     // Save session memory — Supabase first, localStorage fallback
     const sessionData={
-      summary:p6.replace(/^📋\s*/,""),
+      summary:p6.replace(/^\u{1F4CB}\s*/u,""),
       candidates:state.activeCandidates?.length||0,
       prospects:state.salesProspects?.length||0,
       kb_items:state.supportKB?.length||0,
@@ -4516,7 +4519,7 @@ function WarRoomMode(){
         <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} style={{marginBottom:12}}>
           <Card style={{padding:16,background:"linear-gradient(135deg,#F5F3FF,#EDE9FE)",border:"1.5px solid #A78BFA"}}>
             <div style={{fontSize:11,fontWeight:800,color:"#6D28D9",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>📋 AI Executive Summary</div>
-            <div style={{fontSize:13,color:"#4C1D95",lineHeight:1.75}}>{phaseResults[6].replace(/^📋\s*/,"")}</div>
+            <div style={{fontSize:13,color:"#4C1D95",lineHeight:1.75}}>{phaseResults[6].replace(/^\u{1F4CB}\s*/u,"")}</div>
           </Card>
         </motion.div>
       )}
@@ -4980,7 +4983,7 @@ function ActivityPanel(){
   const totalCalls=log.filter(e=>e.status==="done").length;
   const avgMs=totalCalls>0?Math.round(log.filter(e=>e.ms).reduce((s,e)=>s+e.ms,0)/totalCalls):0;
   const statusColor={done:"#22C55E",streaming:"#F59E0B",pending:"#F59E0B",error:"#EF4444"};
-  const statusIcon={done:"✓",streaming:"⟳",pending:"⌛",error:"✕"};
+  const statusIcon={done:"✓",streaming:"↻",pending:"⌛",error:"✕"};
   return(
     <>
       {/* Floating badge */}
@@ -5012,7 +5015,7 @@ function ActivityPanel(){
                 </div>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:12,color:"#E5E7EB",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                    {entry.status==="streaming"?"⟳ ":""}{entry.label||"AI call"}
+                    {entry.status==="streaming"?"↻ ":""}{entry.label||"AI call"}
                   </div>
                   <div style={{fontSize:11,color:"#6B7280",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
                     {entry.mode&&<span style={{color:"#7C3AED"}}>#{entry.callId} {entry.mode}</span>}
@@ -5076,7 +5079,6 @@ function AppDataLoader(){
   },[]);
   return null;
 }
-
 export default function App(){
   const[state,dispatch]=useReducer(reducer,initialState);
   return(
