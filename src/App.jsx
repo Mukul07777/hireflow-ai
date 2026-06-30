@@ -408,6 +408,145 @@ function AnimatedCount({end,prefix="",suffix="",delay=0}){
   return<span>{prefix}{val.toLocaleString("en-IN")}{suffix}</span>;
 }
 
+// ── LIVE AGENT NETWORK VISUALIZATION ─────────────────────────────────────
+const AGENT_NODES=[
+  {id:"smb",    label:"SMB Brain",   icon:"🏪", x:400, y:80,  color:"#8B5CF6"},
+  {id:"hiring", label:"HireFlow",    icon:"🧠", x:160, y:210, color:"#534AB7"},
+  {id:"sales",  label:"SalesFlow",   icon:"🎯", x:640, y:210, color:"#F59E0B"},
+  {id:"support",label:"SupportFlow", icon:"💬", x:160, y:360, color:"#1D9E75"},
+  {id:"care",   label:"CareFlow",    icon:"❤️", x:640, y:360, color:"#F43F5E"},
+  {id:"warroom",label:"War Room",    icon:"⚡", x:400, y:450, color:"#0EA5E9"},
+];
+const AGENT_EDGES=[
+  {from:"smb",to:"sales"},{from:"smb",to:"support"},{from:"smb",to:"hiring"},
+  {from:"hiring",to:"warroom"},{from:"sales",to:"warroom"},
+  {from:"support",to:"warroom"},{from:"care",to:"warroom"},
+  {from:"care",to:"sales"},{from:"support",to:"care"},
+];
+const EVENT_EDGE_MAP={
+  smb_to_sales:{from:"smb",to:"sales"},smb_to_support:{from:"smb",to:"support"},
+  smb_complete:{from:"smb",to:"warroom"},care_to_sales:{from:"care",to:"sales"},
+  agent_handoff:{from:"hiring",to:"warroom"},hiring_to_care:{from:"hiring",to:"care"},
+};
+function AgentNetworkViz({crossEvents=[],onNodeClick}){
+  const[pulses,setPulses]=useState([]); // [{id,ax,ay,bx,by,col,progress,ambient}]
+  const[hovered,setHovered]=useState(null);
+  const[activeNodes,setActiveNodes]=useState(new Set());
+  const rafRef=useRef(null);
+  const pulsesRef=useRef([]);
+
+  // RAF loop to animate pulses
+  useEffect(()=>{
+    const tick=()=>{
+      pulsesRef.current=pulsesRef.current.map(p=>({...p,progress:p.progress+(p.ambient?0.008:0.012)})).filter(p=>p.progress<=1);
+      setPulses([...pulsesRef.current]);
+      rafRef.current=requestAnimationFrame(tick);
+    };
+    rafRef.current=requestAnimationFrame(tick);
+    return()=>cancelAnimationFrame(rafRef.current);
+  },[]);
+
+  const spawnPulse=(fromId,toId,ambient=false)=>{
+    const a=AGENT_NODES.find(n=>n.id===fromId),b=AGENT_NODES.find(n=>n.id===toId);
+    if(!a||!b) return;
+    const id=Date.now()+Math.random();
+    pulsesRef.current=[...pulsesRef.current,{id,ax:a.x,ay:a.y,bx:b.x,by:b.y,col:a.color,progress:0,ambient}];
+  };
+
+  // React to cross events
+  useEffect(()=>{
+    if(!crossEvents.length) return;
+    const pair=EVENT_EDGE_MAP[crossEvents[0]?.type];
+    if(!pair) return;
+    spawnPulse(pair.from,pair.to,false);
+    setActiveNodes(s=>new Set([...s,pair.from,pair.to]));
+    const t=setTimeout(()=>setActiveNodes(s=>{const n=new Set(s);n.delete(pair.from);n.delete(pair.to);return n;}),2500);
+    return()=>clearTimeout(t);
+  },[crossEvents.length]);
+
+  // Ambient pulses every 2.5s
+  useEffect(()=>{
+    const id=setInterval(()=>{
+      const e=AGENT_EDGES[Math.floor(Math.random()*AGENT_EDGES.length)];
+      spawnPulse(e.from,e.to,true);
+    },2500);
+    return()=>clearInterval(id);
+  },[]);
+
+  const W=800,H=520;
+  return(
+    <div style={{background:"#09090B",padding:"0 0 28px",overflow:"hidden"}}>
+      <div style={{maxWidth:860,margin:"0 auto",padding:"0 28px"}}>
+        <div style={{textAlign:"center",marginBottom:12}}>
+          <span style={{fontSize:10,fontWeight:800,color:"rgba(255,255,255,0.22)",letterSpacing:"0.14em",textTransform:"uppercase"}}>Live multi-agent network — click any node to open</span>
+        </div>
+        <div style={{position:"relative",borderRadius:16,border:"1px solid rgba(255,255,255,0.06)",background:"rgba(255,255,255,0.015)",overflow:"hidden"}}>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",display:"block"}}>
+            {/* Edges */}
+            {AGENT_EDGES.map((e,i)=>{
+              const a=AGENT_NODES.find(n=>n.id===e.from),b=AGENT_NODES.find(n=>n.id===e.to);
+              const hot=hovered===e.from||hovered===e.to;
+              return<line key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+                stroke={hot?"rgba(139,92,246,0.45)":"rgba(255,255,255,0.055)"}
+                strokeWidth={hot?1.5:1} strokeDasharray={hot?"none":"5 5"}/>;
+            })}
+            {/* JS-driven pulses */}
+            {pulses.map(p=>{
+              const t=p.progress;
+              const cx=p.ax+(p.bx-p.ax)*t;
+              const cy=p.ay+(p.by-p.ay)*t;
+              const opacity=t<0.15?t/0.15:t>0.8?(1-t)/0.2:1;
+              return<circle key={p.id} cx={cx} cy={cy} r={p.ambient?3:5}
+                fill={p.col} opacity={(p.ambient?0.55:0.95)*opacity}
+                style={{filter:`drop-shadow(0 0 ${p.ambient?5:10}px ${p.col})`}}/>;
+            })}
+            {/* Nodes */}
+            {AGENT_NODES.map(n=>{
+              const hov=hovered===n.id,act=activeNodes.has(n.id);
+              return(
+                <g key={n.id} style={{cursor:"pointer"}}
+                  onMouseEnter={()=>setHovered(n.id)} onMouseLeave={()=>setHovered(null)}
+                  onClick={()=>onNodeClick&&onNodeClick(n.id)}>
+                  {/* Glow */}
+                  <circle cx={n.x} cy={n.y} r={act?56:hov?50:38}
+                    fill={n.color} opacity={act?0.18:hov?0.14:0.07}
+                    style={{transition:"all 0.35s"}}/>
+                  {/* Node bg */}
+                  <circle cx={n.x} cy={n.y} r={hov?32:27}
+                    fill="#0D0D12" stroke={n.color}
+                    strokeWidth={act?2.5:hov?2:1.3}
+                    opacity={1}
+                    style={{transition:"all 0.25s",filter:act||hov?`drop-shadow(0 0 14px ${n.color}AA)`:"none"}}/>
+                  {/* Icon */}
+                  <text x={n.x} y={n.y+6} textAnchor="middle" fontSize={hov?19:16}
+                    style={{userSelect:"none"}}>{n.icon}</text>
+                  {/* Label */}
+                  <text x={n.x} y={n.y+46} textAnchor="middle" fontSize="10" fontWeight="700"
+                    fill={act||hov?n.color:"rgba(255,255,255,0.38)"}
+                    fontFamily="Inter,system-ui,sans-serif"
+                    style={{userSelect:"none",transition:"fill 0.2s"}}>{n.label}</text>
+                  {/* Live dot */}
+                  {act&&<circle cx={n.x+22} cy={n.y-22} r={4} fill="#22C55E" opacity={0.9}
+                    style={{filter:"drop-shadow(0 0 4px #22C55E)"}}/>}
+                </g>
+              );
+            })}
+            {/* Watermark */}
+            <text x={W/2} y={H/2+4} textAnchor="middle" fontSize="11" fontWeight="900"
+              fill="rgba(255,255,255,0.04)" fontFamily="Inter,system-ui,sans-serif"
+              letterSpacing="4" style={{userSelect:"none"}}>FLOWZINT AI</text>
+          </svg>
+          {crossEvents.length>0&&(
+            <div style={{position:"absolute",bottom:10,left:"50%",transform:"translateX(-50%)",background:"rgba(109,95,250,0.18)",border:"1px solid rgba(109,95,250,0.35)",borderRadius:20,padding:"5px 16px",whiteSpace:"nowrap",backdropFilter:"blur(6px)"}}>
+              <span style={{fontSize:9,fontWeight:700,color:"#C4B5FD"}}>⚡ {crossEvents[0].title}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HomeScreen(){
   const{state,dispatch}=useStore();
 
@@ -543,6 +682,9 @@ function HomeScreen(){
           </motion.div>
         </div>
       </div>
+
+      {/* ── LIVE AGENT NETWORK ──────────────────────────────── */}
+      <AgentNetworkViz crossEvents={state.crossEvents} onNodeClick={(id)=>dispatch({type:"SET_MODE",payload:id})}/>
 
       {/* ── MODE CARDS ──────────────────────────────────────── */}
       <div className="mode-cards-section" style={{background:"#FAFAFA",borderTop:"1px solid rgba(255,255,255,0.06)",padding:"56px 28px 48px"}}>
