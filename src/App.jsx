@@ -182,6 +182,49 @@ function VoiceMicBtn({onResult,lang,style={}}){
   );
 }
 
+// ── SUPABASE AUTH (pure fetch — no SDK) ──────────────────────────────────
+const SB_URL=import.meta.env.VITE_SUPABASE_URL||"";
+const SB_KEY=import.meta.env.VITE_SUPABASE_ANON_KEY||"";
+const SB_AUTH=SB_URL?`${SB_URL}/auth/v1`:"";
+const AUTH_STORAGE_KEY="flowzint_auth_session";
+
+async function authSignUp(email,password,name=""){
+  if(!SB_AUTH) return{error:{message:"Supabase not configured"}};
+  try{
+    const r=await fetch(`${SB_AUTH}/signup`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SB_KEY},body:JSON.stringify({email,password,data:{full_name:name}})});
+    return r.json();
+  }catch(e){return{error:{message:e.message}};}
+}
+async function authSignIn(email,password){
+  if(!SB_AUTH) return{error:{message:"Supabase not configured"}};
+  try{
+    const r=await fetch(`${SB_AUTH}/token?grant_type=password`,{method:"POST",headers:{"Content-Type":"application/json","apikey":SB_KEY},body:JSON.stringify({email,password})});
+    return r.json();
+  }catch(e){return{error:{message:e.message}};}
+}
+async function authSignOut(token){
+  if(!SB_AUTH||!token) return;
+  try{await fetch(`${SB_AUTH}/logout`,{method:"POST",headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY}});}catch{}
+}
+async function authGetUser(token){
+  if(!SB_AUTH||!token) return null;
+  try{
+    const r=await fetch(`${SB_AUTH}/user`,{headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY}});
+    const d=await r.json();
+    return d.id?d:null;
+  }catch{return null;}
+}
+function authGoogleUrl(){
+  if(!SB_AUTH) return"";
+  return`${SB_AUTH}/authorize?provider=google&redirect_to=${encodeURIComponent(window.location.origin)}`;
+}
+function getStoredSession(){
+  try{const s=localStorage.getItem(AUTH_STORAGE_KEY);return s?JSON.parse(s):null;}catch{return null;}
+}
+function storeSession(session){
+  try{if(session)localStorage.setItem(AUTH_STORAGE_KEY,JSON.stringify(session));else localStorage.removeItem(AUTH_STORAGE_KEY);}catch{}
+}
+
 // ── GROQ KEY ROTATION (round-robin across up to 4 keys for load distribution) ──
 const _GROQ_KEYS=[
   import.meta.env.VITE_GROQ_API_KEY,
@@ -716,6 +759,7 @@ function HomeScreen(){
               onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.07)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";e.currentTarget.style.color="rgba(255,255,255,0.8)";}}>
               Features & Docs
             </button>
+            <UserChip/>
           </div>
         </div>
 
@@ -4793,6 +4837,32 @@ function HiringShell(){
   );
 }
 
+function UserChip(){
+  const{handleSignOut,displayName,initials,session}=useStore();
+  const[open,setOpen]=useState(false);
+  if(!session) return null;
+  return(
+    <div style={{position:"relative"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{display:"flex",alignItems:"center",gap:7,background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:20,padding:"4px 10px 4px 4px",cursor:"pointer"}}>
+        <div style={{width:26,height:26,borderRadius:"50%",background:"linear-gradient(135deg,#534AB7,#7F77DD)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:"#fff"}}>{initials}</div>
+        <span style={{fontSize:11,fontWeight:600,color:"#374151",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{displayName}</span>
+        <span style={{fontSize:9,color:"#9CA3AF"}}>▾</span>
+      </button>
+      {open&&(
+        <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,background:"#fff",border:"1px solid #E5E7EB",borderRadius:12,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",minWidth:160,zIndex:9999,overflow:"hidden"}}>
+          <div style={{padding:"10px 14px",borderBottom:"1px solid #F3F4F6"}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#111827"}}>{displayName}</div>
+            <div style={{fontSize:10,color:"#9CA3AF"}}>{session.user?.email||"Demo mode"}</div>
+          </div>
+          <button onClick={()=>{setOpen(false);handleSignOut();}} style={{width:"100%",padding:"10px 14px",background:"none",border:"none",textAlign:"left",fontSize:12,fontWeight:600,color:"#EF4444",cursor:"pointer",display:"flex",alignItems:"center",gap:8}}>
+            <span>→</span> Sign out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
   const{state,dispatch}=useStore();
   return(
@@ -4831,6 +4901,7 @@ function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
           onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>
           ← All modes
         </button>
+        <UserChip/>
       </div>
     </header>
   );
@@ -4970,6 +5041,170 @@ function ApiKeyBanner(){
   );
 }
 
+// ── AUTH SCREEN ───────────────────────────────────────────────────────────
+function AuthScreen({onAuth}){
+  const[mode,setMode]=useState("login"); // login | signup
+  const[email,setEmail]=useState("");
+  const[password,setPassword]=useState("");
+  const[name,setName]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState("");
+  const[checkingSession,setCheckingSession]=useState(true);
+
+  // Check for existing session or OAuth callback on mount
+  useEffect(()=>{
+    const tryRestore=async()=>{
+      // Check for OAuth hash token
+      const hash=window.location.hash;
+      if(hash&&hash.includes("access_token")){
+        const params=new URLSearchParams(hash.replace("#",""));
+        const token=params.get("access_token");
+        const refresh=params.get("refresh_token");
+        if(token){
+          const user=await authGetUser(token);
+          if(user){
+            const session={access_token:token,refresh_token:refresh,user};
+            storeSession(session);
+            window.history.replaceState(null,"",window.location.pathname);
+            onAuth(session);
+            return;
+          }
+        }
+      }
+      // Check localStorage
+      const stored=getStoredSession();
+      if(stored?.access_token){
+        const user=await authGetUser(stored.access_token);
+        if(user){onAuth({...stored,user});return;}
+        storeSession(null);
+      }
+      setCheckingSession(false);
+    };
+    tryRestore();
+  },[]);
+
+  const submit=async(e)=>{
+    e.preventDefault();
+    if(!email||!password){setError("Email and password required");return;}
+    setLoading(true);setError("");
+    const res=mode==="signup"?await authSignUp(email,password,name):await authSignIn(email,password);
+    setLoading(false);
+    if(res.error||res.error_description){
+      setError(res.error_description||res.error?.message||"Authentication failed");
+      return;
+    }
+    if(mode==="signup"&&!res.access_token){
+      setError("Check your email to confirm your account, then sign in.");
+      setMode("login");
+      return;
+    }
+    const session={access_token:res.access_token,refresh_token:res.refresh_token,user:res.user};
+    storeSession(session);
+    onAuth(session);
+  };
+
+  if(checkingSession){
+    return(
+      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#0F0F1A 0%,#1E1B4B 50%,#0F172A 100%)"}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
+          <div style={{width:48,height:48,border:"3px solid rgba(109,95,250,0.3)",borderTopColor:"#6D5FFA",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <div style={{color:"#6B7280",fontSize:13}}>Restoring session...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",background:"linear-gradient(135deg,#0F0F1A 0%,#1E1B4B 50%,#0F172A 100%)"}}>
+      {/* Left panel — branding */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 48px",display:"none"}} className="auth-left">
+        <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:"-0.02em",marginBottom:12}}>
+          <span style={{background:"linear-gradient(135deg,#6D5FFA,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>FlowZint AI</span>
+        </div>
+        <div style={{fontSize:18,color:"#9CA3AF",lineHeight:1.6,marginBottom:32}}>Multi-agent business intelligence for Indian SMBs. 6 AI agents, one command center.</div>
+        {[
+          {icon:"🧠",label:"HireFlow — AI hiring pipeline"},
+          {icon:"🎯",label:"SalesFlow — autonomous prospecting"},
+          {icon:"⚡",label:"War Room — agent command center"},
+          {icon:"🔮",label:"Predictive intelligence"},
+        ].map((f,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+            <div style={{width:36,height:36,background:"rgba(109,95,250,0.15)",border:"1px solid rgba(109,95,250,0.3)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{f.icon}</div>
+            <div style={{fontSize:14,color:"#D1D5DB"}}>{f.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Right panel — auth form */}
+      <div style={{width:"100%",maxWidth:440,margin:"auto",padding:32,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+        <motion.div initial={{opacity:0,y:24}} animate={{opacity:1,y:0}} transition={{duration:0.4}}
+          style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:36,backdropFilter:"blur(12px)"}}>
+
+          {/* Logo */}
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
+            <div style={{width:40,height:40,background:"linear-gradient(135deg,#534AB7,#7F77DD)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 0 20px rgba(109,95,250,0.4)"}}>⚡</div>
+            <div>
+              <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>FlowZint AI</div>
+              <div style={{fontSize:11,color:"#6B7280"}}>Multi-Agent Intelligence Platform</div>
+            </div>
+          </div>
+
+          <div style={{fontSize:22,fontWeight:800,color:"#fff",marginBottom:4}}>{mode==="login"?"Welcome back":"Create account"}</div>
+          <div style={{fontSize:13,color:"#6B7280",marginBottom:24}}>{mode==="login"?"Sign in to your workspace":"Start your free workspace"}</div>
+
+          {/* Google OAuth */}
+          {SB_AUTH&&(
+            <a href={authGoogleUrl()} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,width:"100%",padding:"11px 16px",background:"#fff",borderRadius:10,border:"none",fontSize:13,fontWeight:700,color:"#111",cursor:"pointer",textDecoration:"none",marginBottom:16,boxSizing:"border-box"}}>
+              <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
+              Continue with Google
+            </a>
+          )}
+
+          {SB_AUTH&&<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}><div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/><span style={{fontSize:11,color:"#4B5563"}}>or</span><div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/></div>}
+
+          {/* Form */}
+          <form onSubmit={submit}>
+            {mode==="signup"&&(
+              <div style={{marginBottom:12}}>
+                <label style={{fontSize:11,fontWeight:700,color:"#9CA3AF",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Full Name</label>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Aryan Sharma" style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,fontSize:13,color:"#fff",outline:"none",boxSizing:"border-box"}}/>
+              </div>
+            )}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:11,fontWeight:700,color:"#9CA3AF",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Email</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com" style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,fontSize:13,color:"#fff",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div style={{marginBottom:error?12:20}}>
+              <label style={{fontSize:11,fontWeight:700,color:"#9CA3AF",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Password</label>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,fontSize:13,color:"#fff",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            {error&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:"#FCA5A5"}}>{error}</div>}
+            <button type="submit" disabled={loading} style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#534AB7,#6D5FFA)",border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.7:1,transition:"all 0.2s"}}>
+              {loading?(mode==="login"?"Signing in...":"Creating account..."):(mode==="login"?"Sign In":"Create Account")}
+            </button>
+          </form>
+
+          <div style={{textAlign:"center",marginTop:16,fontSize:12,color:"#6B7280"}}>
+            {mode==="login"?"Don't have an account? ":"Already have an account? "}
+            <button onClick={()=>{setMode(mode==="login"?"signup":"login");setError("");}} style={{background:"none",border:"none",color:"#818CF8",cursor:"pointer",fontWeight:700,fontSize:12}}>
+              {mode==="login"?"Sign up free":"Sign in"}
+            </button>
+          </div>
+
+          {/* Demo bypass */}
+          <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:20,paddingTop:20,textAlign:"center"}}>
+            <div style={{fontSize:11,color:"#4B5563",marginBottom:10}}>Evaluating the platform?</div>
+            <button onClick={()=>onAuth({access_token:"demo",user:{email:"demo@flowzint.ai",user_metadata:{full_name:"Demo User"}},isDemo:true})}
+              style={{width:"100%",padding:"10px",background:"rgba(109,95,250,0.08)",border:"1px solid rgba(109,95,250,0.25)",borderRadius:10,color:"#818CF8",fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.2s"}}>
+              Try Demo — No signup needed
+            </button>
+          </div>
+        </motion.div>
+      </div>
+    </div>
+  );
+}
+
 // ── ACTIVITY PANEL — live backend transparency ────────────────────────────
 function ActivityPanel(){
   const[open,setOpen]=useState(false);
@@ -5081,8 +5316,26 @@ function AppDataLoader(){
 }
 export default function App(){
   const[state,dispatch]=useReducer(reducer,initialState);
+  const[session,setSession]=useState(null);
+  const handleAuth=(s)=>setSession(s);
+  const handleSignOut=async()=>{
+    if(session&&!session.isDemo) await authSignOut(session.access_token);
+    storeSession(null);
+    setSession(null);
+  };
+  if(!session){
+    return(
+      <>
+        <style>{GLOBAL_STYLES}</style>
+        <AuthScreen onAuth={handleAuth}/>
+      </>
+    );
+  }
+  const user=session.user;
+  const displayName=user?.user_metadata?.full_name||user?.email?.split("@")[0]||"User";
+  const initials=displayName.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
   return(
-    <Ctx.Provider value={{state,dispatch}}>
+    <Ctx.Provider value={{state,dispatch,session,handleSignOut,displayName,initials}}>
       <style>{GLOBAL_STYLES}</style>
       <div style={{filter:state.darkMode?"invert(1) hue-rotate(180deg)":"none",minHeight:"100vh",transition:"filter 0.3s ease"}}>
       <ApiKeyBanner/>
