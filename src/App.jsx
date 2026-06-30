@@ -836,8 +836,37 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
     }));
     toast("Scoring "+appliedResumes.length+" submitted resumes against your JD","info");
   }else{
-    domainCandidates=getCandidatesForDomain(domain);
-    toast("No resumes submitted — using sample "+domain+" candidates","info");
+    // Generate realistic candidates dynamically from the JD using AI
+    toast("Generating realistic candidates from your JD...","info");
+    const colorPairs=[["#EEEDFE","#3C3489"],["#E1F5EE","#085041"],["#FAEEDA","#633806"],["#FBEAF0","#72243E"],["#F3F0FF","#5B21B6"]];
+    try{
+      const genPrompt=`You are a realistic hiring data generator for Indian tech companies. Based on this JD, generate 5 real-feeling candidate profiles from India.\n\nJD:\n${jdText.slice(0,600)}\n\nReturn ONLY a valid JSON array — no markdown, no extra text:\n[\n  {\n    "name": "full Indian name",\n    "role": "their current job title",\n    "company": "realistic Indian/global company they work at",\n    "city": "Indian city",\n    "exp": "X years",\n    "skills": ["skill1","skill2","skill3","skill4"],\n    "gaps": ["gap1"],\n    "summary": "one sentence about their most impressive work achievement",\n    "salary": <number in lakhs, integer>,\n    "notice": "X days",\n    "remote": true,\n    "email": "firstname.lastname@gmail.com"\n  }\n]\n\nRules:\n- Mix 2-3 women and men\n- Use realistic Indian companies (Razorpay, Zepto, Meesho, CRED, Groww, Swiggy, Flipkart, PhonePe, Juspay, etc)\n- Vary cities: Bangalore, Mumbai, Hyderabad, Pune, Chennai, Delhi\n- Skills must be relevant to the JD role\n- One candidate should be slightly under-qualified, one overqualified\n- Make salaries realistic for Indian market`;
+      const raw=await callClaude([{role:"user",content:genPrompt}],"Output ONLY valid JSON array. No markdown fences.");
+      let parsed=null;
+      try{
+        const jsonStr=raw.replace(/```json\n?/g,"").replace(/```\n?/g,"").trim();
+        parsed=JSON.parse(jsonStr);
+      }catch{
+        const m=raw.match(/\[[\s\S]*\]/);
+        if(m) parsed=JSON.parse(m[0]);
+      }
+      if(parsed&&Array.isArray(parsed)&&parsed.length>0){
+        domainCandidates=parsed.map((c,i)=>({
+          ...c,
+          id:"gen_"+(i+1),
+          avatar:(c.name||"").trim().split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(),
+          avatarBg:colorPairs[i%5][0],
+          avatarText:colorPairs[i%5][1],
+          baseScore:75, domain,
+        }));
+        toast("Generated "+domainCandidates.length+" candidates from your JD","success");
+      }else{
+        throw new Error("Parse failed");
+      }
+    }catch(e){
+      domainCandidates=getCandidatesForDomain(domain);
+      toast("Using sample "+domain+" candidates","info");
+    }
   }
   dispatch({type:"SET_ACTIVE_CANDIDATES",payload:{candidates:domainCandidates,domain}});
 
@@ -2482,7 +2511,9 @@ function SalesMode(){
   const[genPhase,setGenPhase]=useState(""); // "thinking" | "scoring" | "writing" | ""
 
   const generate=async()=>{
-    if(!state.salesProduct.trim()){toast("Add product description first","error");return;}
+    if(!state.salesProduct.trim()){toast("Add your product description first","error");return;}
+    if(!state.salesTarget.trim()){toast("Add your target customer description first","error");return;}
+    if(!GROQ_API_KEY){toast("API key missing — add VITE_GROQ_API_KEY to .env","error");return;}
     dispatch({type:"SET_SALES_RUNNING",val:true});
     setGenThought("");setGenPhase("thinking");
     toast("Generating prospects...","info");
@@ -2712,15 +2743,19 @@ function SupportMode(){
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[state.supportChats,activeChatId]);
 
   const buildKB=async()=>{
-    if(!state.supportDocs.trim()){toast("Add docs first","error");return;}
+    if(!state.supportDocs.trim()){toast("Add your product docs first — paste text or use Sample","error");return;}
+    if(!GROQ_API_KEY){toast("API key missing — add VITE_GROQ_API_KEY to .env","error");return;}
     dispatch({type:"SET_SUPPORT_BUILDING",val:true});
-    toast("AI building knowledge base from your docs...","info");
+    toast("Step 1/3 — Reading docs...","info");
+    await new Promise(r=>setTimeout(r,600));
+    toast("Step 2/3 — Extracting FAQ pairs...","info");
     try{
       const raw=await callClaude([{role:"user",content:"Extract 6-8 FAQ pairs from these product docs. Return ONLY JSON array, no markdown:\n[{\"q\":\"customer question\",\"a\":\"concise answer\"}]\n\nDocs:\n"+state.supportDocs}],"Expert support KB builder. Extract real questions customers would ask. Be specific to the actual content.");
       const clean=raw.split("```").join("").replace(/^json\s*/i,"").trim();
       const kb=JSON.parse(clean);
       dispatch({type:"SET_SUPPORT_KB",payload:kb});
-      toast("Knowledge base ready — "+kb.length+" items extracted","success");
+      await new Promise(r=>setTimeout(r,300));
+      toast("Step 3/3 — KB indexed! "+kb.length+" FAQ items ready. Chat bot is live.","success");
     }catch{
       dispatch({type:"SET_SUPPORT_KB",payload:[
         {q:"How do I get started?",a:"Sign up, create workspace, choose template, paste context, run pipeline."},
@@ -3333,6 +3368,14 @@ function WarRoomMode(){
     {id:6,title:"Command report",icon:"📊",desc:"Unified intelligence report ready"},
   ];
 
+  // ── Pull real data BEFORE AGENT_PAIRS uses it ──────────────────────────
+  const topCandidate=state.activeCandidates?.[0];
+  const topScore=topCandidate&&state.dynamicScores?.[topCandidate.id]?state.dynamicScores[topCandidate.id]:91;
+  const topProspect=state.salesProspects?.[0];
+  const kbCount=state.supportKB?.length||8;
+  const smbName=state.smbProfile?.name;
+  const hasRealData=topProspect||state.supportKB?.length>0||state.smbProfile;
+
   const AGENT_PAIRS=[
     {from:"🧠 HireFlow",to:"🎯 SalesFlow",
      topic:topCandidate?`${topCandidate.name} (score ${topScore}/100) declined our offer but has strong B2B background at ${topCandidate.company||"their company"}. Should we route them as a warm sales prospect instead of letting the lead go cold?`:"A top candidate just declined offer. They have strong B2B sales experience at enterprise companies. Should we route them as a warm sales prospect instead?"},
@@ -3346,13 +3389,7 @@ function WarRoomMode(){
      topic:topCandidate?`${topCandidate.name} accepted the offer and starts in 2 weeks. Their role requires access to billing, CRM, and HR systems. What Day-1 onboarding tickets should CareFlow auto-create now?`:"Pipeline is complete. We have a candidate accepting offer — starting in 2 weeks. What onboarding tickets should CareFlow create proactively for Day 1 readiness?"},
   ];
 
-  // Pull real data from other modes
-  const topCandidate=state.activeCandidates?.[0];
-  const topScore=topCandidate&&state.dynamicScores?.[topCandidate.id]?state.dynamicScores[topCandidate.id]:91;
-  const topProspect=state.salesProspects?.[0];
-  const kbCount=state.supportKB?.length||8;
-  const smbName=state.smbProfile?.name;
-  const hasRealData=topProspect||state.supportKB?.length>0||state.smbProfile;
+  // (real data already pulled above before AGENT_PAIRS)
 
   const PHASE_RESULTS_DATA=[
     smbName?`Context loaded — ${smbName} profile + ${state.salesProspects?.length||0} prospects + ${kbCount} KB items ready`:"Context loaded from 4 AI systems — all agents briefed",
@@ -3367,14 +3404,55 @@ function WarRoomMode(){
   const run=async()=>{
     setRunning(true);setDebates([]);setMetrics(null);setPhaseResults({});
     toast("War Room activated — all 4 AI systems online","info");
-    for(let i=0;i<=6;i++){
-      setPhase(i);
-      if(i<5) await new Promise(r=>setTimeout(r,1600));
-      // Mark previous phase done with result
-      if(i>0&&PHASE_RESULTS_DATA[i-1]){
-        setPhaseResults(prev=>({...prev,[i-1]:PHASE_RESULTS_DATA[i-1]}));
-      }
-      if(i===5){
+
+    // Phase 0: Context briefing — real AI
+    setPhase(0);
+    let p0="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the War Room orchestrator briefing 4 AI systems.\n\nActive context:\n- HireFlow: ${topCandidate?topCandidate.name+" ("+topScore+"/100), "+topCandidate.role+" at "+(topCandidate.company||"?"):"no pipeline run yet"}\n- SalesFlow: ${topProspect?state.salesProspects.length+" prospects, top: "+topProspect.name+" @ "+topProspect.company+" ("+topProspect.fitScore+"% fit)":"no prospects yet"}\n- SupportFlow: ${kbCount} KB items active\n- SMB: ${smbName||"no SMB profile"}\n\nWrite a 2-sentence briefing: what's loaded and what the War Room will do. Be specific, use actual names/numbers.`}],
+      "War Room orchestrator AI. Concise, military-style briefing. 50 words max.",
+      (acc)=>{p0=acc;setPhaseResults(prev=>({...prev,0:"🤖 "+acc}));}
+    );
+
+    // Phase 1: HireFlow agent run — real AI
+    setPhase(1);
+    let p1="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD"}\n\nReport your hiring pipeline status in 2 sentences: what you found, who's ranked top, and one risk.`}],
+      "HireFlow agent. Data-driven. Reference actual candidate names and scores. 60 words max.",
+      (acc)=>{p1=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));}
+    );
+
+    // Phase 2: SalesFlow agent — real AI
+    setPhase(2);
+    let p2="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\nProspect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint,budget:topProspect.budget}):"No prospects generated yet"}\n\nReport your sales pipeline status in 2 sentences: prospects scored, top pick, and next action.`}],
+      "SalesFlow agent. Specific, numbers-driven. Reference actual prospect names. 60 words max.",
+      (acc)=>{p2=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));}
+    );
+
+    // Phase 3: SupportFlow agent — real AI
+    setPhase(3);
+    let p3="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample questions: "+state.supportKB.slice(0,2).map(k=>k.q).join("; "):"No KB built yet"}\n\nReport your support readiness in 2 sentences: what's indexed, escalation patterns detected, and chat bot status.`}],
+      "SupportFlow agent. Specific. Mention actual KB content if available. 60 words max.",
+      (acc)=>{p3=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));}
+    );
+
+    // Phase 4: CareFlow agent — real AI
+    setPhase(4);
+    let p4="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\nTicket queue: 5 tickets — 1 billing dispute (Raj Patel, urgent), 1 tech issue (Priya Nair, high), 1 upsell opportunity (Amir Khan, normal), 1 login issue (Sunita Rao, high), 1 positive feedback (Vikram Singh, low).\n\nReport your triage status in 2 sentences: tickets processed, urgency ranking, upsell detected.`}],
+      "CareFlow agent. Specific about ticket names and priorities. 60 words max.",
+      (acc)=>{p4=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));}
+    );
+
+    // Phase 5: Cross-agent debates
+    setPhase(5);
+    if(true){
         // Real streaming AI debates
         for(const pair of AGENT_PAIRS){
           const debateId=Date.now()+Math.random();
@@ -3391,9 +3469,17 @@ function WarRoomMode(){
           await new Promise(r=>setTimeout(r,400));
         }
         setPhaseResults(prev=>({...prev,5:`${AGENT_PAIRS.length} cross-agent handoffs completed — all tasks auto-routed`}));
-      }
     }
-    setPhaseResults(prev=>({...prev,6:PHASE_RESULTS_DATA[6]}));
+
+    // Phase 6: Final unified report — real AI
+    setPhase(6);
+    let p6="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the War Room AI generating the final unified intelligence report.\n\nWhat ran:\n- HireFlow: ${p1.slice(0,120)}\n- SalesFlow: ${p2.slice(0,120)}\n- SupportFlow: ${p3.slice(0,120)}\n- CareFlow: ${p4.slice(0,120)}\n\nWrite a 3-sentence executive summary: total outcomes, cross-agent handoffs made, and ROI estimate in hours saved and rupees.`}],
+      "War Room report AI. Authoritative. Specific numbers. 80 words max.",
+      (acc)=>{p6=acc;setPhaseResults(prev=>({...prev,6:"📋 "+acc}));}
+    );
+
     setMetrics({done:true});
     setRunning(false);
     toast("War Room complete — unified report ready","success");
@@ -3694,143 +3780,4 @@ function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
         </div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <span style={{fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:20,background:color+"14",color:color,border:"1px solid "+color+"30"}}>{tag}</span>
-        <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
-          style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor="#6D5FFA";e.currentTarget.style.color="#6D5FFA";}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>
-          ← All modes
-        </button>
-      </div>
-    </header>
-  );
-}
-
-// ── GLOBAL TIME SAVED COUNTER + KEYBOARD SHORTCUTS ───────────────────────
-function GlobalOverlay(){
-  const{state,dispatch}=useStore();
-  const[count,setCount]=useState(0);
-  const[visible,setVisible]=useState(true);
-  const pipelineDone=state.pipelineState==="done";
-
-  // Keyboard shortcuts
-  useEffect(()=>{
-    const handler=(e)=>{
-      if(e.key==="Escape") dispatch({type:"SET_MODE",payload:"home"});
-      if(e.key==="h"&&(e.metaKey||e.ctrlKey)){e.preventDefault();dispatch({type:"SET_MODE",payload:"hiring"});}
-      if(e.key==="s"&&(e.metaKey||e.ctrlKey)){e.preventDefault();dispatch({type:"SET_MODE",payload:"sales"});}
-    };
-    window.addEventListener("keydown",handler);
-    return()=>window.removeEventListener("keydown",handler);
-  },[dispatch]);
-
-  // Count up from 0 to total time saved
-  const totalHours=pipelineDone?Math.round((state.appliedResumes?.length||42)*0.35)+8:0;
-  useEffect(()=>{
-    if(!pipelineDone){setCount(0);return;}
-    let c=0;
-    const step=Math.ceil(totalHours/40);
-    const id=setInterval(()=>{
-      c+=step;if(c>=totalHours){setCount(totalHours);clearInterval(id);}else setCount(c);
-    },50);
-    return()=>clearInterval(id);
-  },[pipelineDone,totalHours]);
-
-  if(!pipelineDone||!visible) return null;
-  return(
-    <div style={{position:"fixed",bottom:20,left:20,zIndex:8000,animation:"fadeIn 0.5s ease"}}>
-      <div style={{background:"linear-gradient(135deg,#0F172A,#1D9E75)",borderRadius:14,padding:"10px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 24px rgba(0,0,0,0.22)",cursor:"pointer"}} onClick={()=>setVisible(false)} title="Click to dismiss">
-        <div style={{fontSize:20}}>⏱</div>
-        <div>
-          <div style={{fontSize:18,fontWeight:900,color:"white",lineHeight:1}}>{count}h</div>
-          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>saved this session</div>
-        </div>
-        <div style={{width:1,height:28,background:"rgba(255,255,255,0.2)"}}/>
-        <div style={{fontSize:9,color:"rgba(255,255,255,0.6)",lineHeight:1.4,maxWidth:70}}>Esc→home<br/>⌘H hiring<br/>⌘S sales</div>
-      </div>
-    </div>
-  );
-}
-
-function PageTransition({children,modeKey}){
-  return(
-    <AnimatePresence mode="wait">
-      <motion.div key={modeKey} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}}
-        transition={{duration:0.22,ease:"easeOut"}} style={{display:"contents"}}>
-        {children}
-      </motion.div>
-    </AnimatePresence>
-  );
-}
-
-function AppInner(){
-  const{state,dispatch}=useStore();
-  const mode=state.appMode;
-  if(mode==="home") return<PageTransition modeKey="home"><HomeScreen/></PageTransition>;
-  if(mode==="hiring") return<PageTransition modeKey="hiring"><HiringShell/></PageTransition>;
-  if(mode==="overview") return(
-    <PageTransition modeKey="overview">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="FlowZint AI" tagColor="neutral"/>
-        <main style={{flex:1,overflow:"hidden"}}><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></main>
-        <ToastLayer/>
-      </div>
-    </PageTransition>
-  );
-  if(mode==="smb") return(
-    <PageTransition modeKey="smb">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="🏪" title="SMB Brain" subtitle="1-Click Indian Business AI" color="#7C3AED" tag="Open Innovation" tagColor="purple"/>
-        <main style={{flex:1,overflowY:"auto",padding:22}}><SMBMode/></main>
-        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
-      </div>
-    </PageTransition>
-  );
-  if(mode==="warroom") return(
-    <PageTransition modeKey="warroom">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="⚡" title="AI War Room" subtitle="Multi-Agent Command Center" color="#6D5FFA" tag="All agents" tagColor="brand"/>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><WarRoomMode/></main>
-        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
-      </div>
-    </PageTransition>
-  );
-  if(mode==="sales") return(
-    <PageTransition modeKey="sales">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="🎯" title="SalesFlow AI" subtitle="Autonomous Sales Agent" color="#BA7517" tag="Sales Bot" tagColor="warn"/>
-        <main style={{flex:1,overflowY:"auto",padding:22}}><SalesMode/></main>
-        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
-      </div>
-    </PageTransition>
-  );
-  if(mode==="support") return(
-    <PageTransition modeKey="support">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="💬" title="SupportFlow AI" subtitle="Intelligent Support Bot" color="#1D9E75" tag="Support Chat Bot" tagColor="success"/>
-        <main style={{flex:1,overflow:"hidden",padding:16}}><SupportMode/></main>
-        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
-      </div>
-    </PageTransition>
-  );
-  if(mode==="care") return(
-    <PageTransition modeKey="care">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="❤️" title="CareFlow AI" subtitle="Customer Care Bot" color="#D4537E" tag="Customer Care Bot" tagColor="pink"/>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><CareMode/></main>
-        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
-      </div>
-    </PageTransition>
-  );
-  return null;
-}
-
-export default function App(){
-  const[state,dispatch]=useReducer(reducer,initialState);
-  return(
-    <Ctx.Provider value={{state,dispatch}}>
-      <style>{GLOBAL_STYLES}</style>
-      <AppInner/>
-    </Ctx.Provider>
-  );
-}
+        <s
