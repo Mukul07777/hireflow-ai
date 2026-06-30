@@ -443,6 +443,53 @@ function Btn({children,variant="secondary",onClick,disabled,fullWidth,size="md",
   return<button style={{...base,...sz[size],...(vs[variant]||vs.secondary)}} onClick={onClick} disabled={disabled} onMouseEnter={()=>setH(true)} onMouseLeave={()=>setH(false)}>{children}</button>;
 }
 function Card({children,style={},onClick}){return<div style={{background:"white",borderRadius:14,border:"1px solid #EEECEA",boxShadow:"0 1px 4px rgba(28,28,26,0.05)",...style}} onClick={onClick}>{children}</div>;}
+
+// ── SKELETON LOADER ───────────────────────────────────────────────────────
+function SkeletonLine({w="100%",h=12,mb=8,radius=6}){
+  return<div style={{width:w,height:h,borderRadius:radius,background:"linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)",backgroundSize:"200% 100%",animation:"shimmer 1.4s infinite",marginBottom:mb}}/>;
+}
+function SkeletonCard({lines=3,style={}}){
+  return(
+    <div style={{background:"white",borderRadius:14,border:"1px solid #EEECEA",padding:16,...style}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+        <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)",backgroundSize:"200% 100%",animation:"shimmer 1.4s infinite",flexShrink:0}}/>
+        <div style={{flex:1}}><SkeletonLine w="60%" h={11} mb={4}/><SkeletonLine w="40%" h={9}/></div>
+      </div>
+      {Array.from({length:lines}).map((_,i)=><SkeletonLine key={i} w={i===lines-1?"65%":"100%"} h={10} mb={6}/>)}
+    </div>
+  );
+}
+function CandidateListSkeleton(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {[1,2,3,4].map(i=><SkeletonCard key={i} lines={2}/>)}
+    </div>
+  );
+}
+function AgentOutputSkeleton(){
+  return(
+    <div style={{background:"white",borderRadius:14,border:"1px solid #EEECEA",padding:20}}>
+      <SkeletonLine w="45%" h={14} mb={16}/>
+      {[1,2,3].map(i=><SkeletonLine key={i} w={i===3?"70%":"100%"} h={10} mb={8}/>)}
+      <div style={{height:1,background:"#F3F4F6",margin:"14px 0"}}/>
+      <SkeletonLine w="30%" h={11} mb={10}/>
+      {[1,2].map(i=><SkeletonLine key={i} w={i===2?"55%":"100%"} h={10} mb={8}/>)}
+    </div>
+  );
+}
+function ProspectListSkeleton(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {[1,2,3,4,5].map(i=>(
+        <div key={i} style={{background:"white",borderRadius:12,border:"1px solid #EEECEA",padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)",backgroundSize:"200% 100%",animation:"shimmer 1.4s infinite",flexShrink:0}}/>
+          <div style={{flex:1}}><SkeletonLine w="50%" h={11} mb={4}/><SkeletonLine w="70%" h={9}/></div>
+          <SkeletonLine w={60} h={26} radius={20}/>
+        </div>
+      ))}
+    </div>
+  );
+}
 function Tag({children,color="neutral"}){
   const cs={neutral:{bg:"#F0EFE9",c:"#5F5E5A"},brand:{bg:"#EEEDFE",c:"#534AB7"},success:{bg:"#E1F5EE",c:"#085041"},warn:{bg:"#FAEEDA",c:"#633806"},danger:{bg:"#FAECE7",c:"#712B13"},pink:{bg:"#FBEAF0",c:"#72243E"},purple:{bg:"#F3F0FF",c:"#5B21B6"}};
   const s=cs[color]||cs.neutral;
@@ -2070,6 +2117,7 @@ function HiringPipeline(){
           )}
 
           {running&&<div style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,fontWeight:600,color:"#534AB7"}}>Agents running...</span><span style={{fontSize:12,fontWeight:700,color:"#534AB7"}}>{progress}%</span></div><ProgressBar value={progress}/></div>}
+          {running&&<div style={{marginTop:8}}><CandidateListSkeleton/></div>}
 
           {!pDone&&<Btn variant="primary" fullWidth disabled={running} onClick={run}>{running?<><Spinner color="white"/>Pipeline running — watch agents below...</>:"Run all 7 agents →"}</Btn>}
 
@@ -3187,7 +3235,7 @@ function SalesMode(){
 
       {activeTab==="prospects"&&(
         <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:760}}>
-          {state.salesProspects.length===0?<Card style={{padding:48,textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>🎯</div><div style={{fontSize:14,fontWeight:700,color:"#1C1C1A",marginBottom:12}}>No prospects yet</div><Btn variant="orange" onClick={()=>setActiveTab("setup")}>Set up product first</Btn></Card>:
+          {state.salesRunning?<ProspectListSkeleton/>:state.salesProspects.length===0?<Card style={{padding:48,textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>🎯</div><div style={{fontSize:14,fontWeight:700,color:"#1C1C1A",marginBottom:12}}>No prospects yet</div><Btn variant="orange" onClick={()=>setActiveTab("setup")}>Set up product first</Btn></Card>:
           state.salesProspects.map(p=>(
             <Card key={p.id} style={{padding:20}}>
               <div style={{display:"flex",alignItems:"flex-start",gap:14}}>
@@ -4488,11 +4536,17 @@ function WarRoomMode(){
               <span style={{fontSize:9,padding:"2px 8px",borderRadius:20,background:"#DCFCE7",color:"#16A34A",fontWeight:700}}>{debates.filter(d=>d.type==="resolve").length} resolved</span>
             </div>}
           </div>
-          {debates.length===0&&(
+          {debates.length===0&&!running&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 0",color:"#D1D5DB",textAlign:"center"}}>
               <div style={{fontSize:36,marginBottom:12,opacity:0.5}}>⚔️</div>
               <div style={{fontSize:13,fontWeight:600,color:"#9CA3AF"}}>Waiting for agents to debate</div>
               <div style={{fontSize:11,color:"#D1D5DB",marginTop:4}}>Agents will disagree, argue, and resolve — all in real time</div>
+            </div>
+          )}
+          {debates.length===0&&running&&(
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <AgentOutputSkeleton/>
+              <AgentOutputSkeleton/>
             </div>
           )}
           <div style={{display:"flex",flexDirection:"column",gap:8,overflowY:"auto",maxHeight:420}}>
@@ -4736,6 +4790,7 @@ body{font-family:Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%;}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
 @keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}

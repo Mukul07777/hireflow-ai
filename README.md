@@ -1,8 +1,46 @@
 # FlowZint AI — Multi-Agent Business Intelligence Platform
 
-**Live Demo:** https://hireflow-ai-liart.vercel.app
+> **Live demo → [hireflow-ai-liart.vercel.app](https://hireflow-ai-liart.vercel.app)**  
+> Sign in with Google, email/password, or click **Try Demo** for instant access.
 
 A multi-agent AI platform where 6 autonomous systems — hiring, sales, support, customer care, SMB intelligence, and a live War Room — share intelligence and hand off tasks to each other in real time. Built for Indian SMBs.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        BROWSER CLIENT                        │
+│                                                              │
+│   AuthScreen ──→ Supabase Auth (email/password + Google)    │
+│        │                                                     │
+│        ▼                                                     │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
+│   │ HireFlow │  │SalesFlow │  │SupportBot│  │  CareBot │  │
+│   │ 7 agents │  │ 3 agents │  │ 2 agents │  │ 2 agents │  │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
+│        └──────────────┴──────────────┴──────────┬──┘        │
+│                    WAR ROOM (command center)     │           │
+│         Phase 1→2→3→4 · Agent debates · Handoffs◄──────────┘│
+│                        │                                     │
+│              ActivityPanel (live Groq API log)               │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+            ┌──────────────┴──────────────┐
+            │                             │
+   GROQ API (Llama 3.3 70B)       SUPABASE (PostgreSQL)
+   Round-robin 4 API keys         pipeline_runs, candidates,
+   SSE streaming + JSON           sales_sessions, care_tickets,
+                                  war_room_sessions + RLS
+```
+
+## What makes this different
+
+- **Not a chatbot** — an agent network with real handoffs, memory, and debate
+- **India-first** — salary benchmarks, Hindi/Hinglish toggle, WhatsApp delivery, Indian market data
+- **Transparent AI** — live backend panel shows every token, every key, every API call in real time
+- **Production patterns** — Supabase Auth + Google OAuth, Row Level Security on all tables, React error boundaries, key rotation across 4 Groq keys, session persistence
 
 ---
 
