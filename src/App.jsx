@@ -114,6 +114,70 @@ const Ctx=createContext(null);
 function useStore(){return useContext(Ctx);}
 function useToast(){const{dispatch}=useStore();return(msg,type="success")=>dispatch({type:"ADD_TOAST",payload:{msg,type}});}
 
+// ── VOICE INPUT ────────────────────────────────────────────────────────────
+function useVoiceInput({onResult,onInterim,lang="en-IN"}){
+  const[listening,setListening]=useState(false);
+  const[supported]=useState(()=>!!window.SpeechRecognition||!!window.webkitSpeechRecognition);
+  const recRef=useRef(null);
+  const start=useCallback(()=>{
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SR) return;
+    const rec=new SR();
+    recRef.current=rec;
+    rec.continuous=true;
+    rec.interimResults=true;
+    rec.lang=lang;
+    rec.onstart=()=>setListening(true);
+    rec.onend=()=>setListening(false);
+    rec.onerror=()=>setListening(false);
+    rec.onresult=(e)=>{
+      let interim="";let final="";
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        if(e.results[i].isFinal) final+=e.results[i][0].transcript+" ";
+        else interim+=e.results[i][0].transcript;
+      }
+      if(final&&onResult) onResult(final);
+      if(onInterim) onInterim(interim);
+    };
+    rec.start();
+  },[lang,onResult,onInterim]);
+  const stop=useCallback(()=>{recRef.current?.stop();},[]);
+  const toggle=useCallback(()=>{listening?stop():start();},[listening,start,stop]);
+  return{listening,supported,toggle,stop};
+}
+
+function VoiceMicBtn({onResult,lang="en-IN",style={}}){
+  const[interim,setInterim]=useState("");
+  const{listening,supported,toggle}=useVoiceInput({
+    onResult:(t)=>onResult(t),
+    onInterim:setInterim,
+    lang,
+  });
+  if(!supported) return null;
+  return(
+    <div style={{position:"relative",...style}}>
+      <button
+        onClick={toggle}
+        title={listening?"Stop recording (click to stop)":"Speak your input (click to start)"}
+        style={{
+          display:"flex",alignItems:"center",gap:6,
+          padding:"7px 14px",
+          background:listening?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#7C3AED,#6D5FFA)",
+          border:"none",borderRadius:10,cursor:"pointer",
+          fontSize:12,fontWeight:700,color:"white",
+          boxShadow:listening?"0 0 0 3px rgba(239,68,68,0.3)":"0 0 0 0px rgba(109,95,250,0)",
+          transition:"all 0.2s",
+          animation:listening?"voicePulse 1.2s ease-in-out infinite":"none",
+        }}>
+        <span style={{fontSize:15}}>{listening?"⏹":"🎙️"}</span>
+        <span>{listening?"Stop":"Speak"}</span>
+        {listening&&<span style={{width:6,height:6,background:"white",borderRadius:"50%",animation:"pulse 0.8s infinite"}}/>}
+      </button>
+      {interim&&<div style={{position:"absolute",top:"calc(100% + 6px)",left:0,right:0,background:"#1C1C1A",color:"white",fontSize:11,padding:"5px 10px",borderRadius:8,zIndex:100,opacity:0.85,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>🎙 {interim}</div>}
+    </div>
+  );
+}
+
 const GROQ_API_KEY=import.meta.env.VITE_GROQ_API_KEY||"";
 const GROQ_MODEL="llama-3.3-70b-versatile";
 
@@ -504,6 +568,7 @@ function HomeScreen(){
             );})}
         </div>
       </div>
+    </div>
 
       {/* ── CROSS-MODE SIGNALS ──────────────────────────────── */}
       {state.crossEvents.length>0&&(
@@ -1474,8 +1539,9 @@ function HiringPipeline(){
           </div>
           {step==="jd"&&(
             <>
-              <textarea value={state.jdText} onChange={e=>dispatch({type:"SET_JD",payload:e.target.value})} style={{width:"100%",height:220,border:"1px solid #EEECEA",borderRadius:10,padding:14,fontSize:13,lineHeight:1.65,color:"#1C1C1A",background:"#FAFAF8",fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",outline:"none"}} placeholder="Paste your job description here — role, requirements, salary range, location..." onFocus={e=>e.target.style.borderColor="#534AB7"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
-              <div style={{display:"flex",gap:8,marginTop:12}}>
+              <textarea value={state.jdText} onChange={e=>dispatch({type:"SET_JD",payload:e.target.value})} style={{width:"100%",height:220,border:"1px solid #EEECEA",borderRadius:10,padding:14,fontSize:13,lineHeight:1.65,color:"#1C1C1A",background:"#FAFAF8",fontFamily:"inherit",resize:"vertical",boxSizing:"border-box",outline:"none"}} placeholder="Paste or speak your job description — role, requirements, salary range, location..." onFocus={e=>e.target.style.borderColor="#534AB7"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
+              <div style={{display:"flex",gap:8,marginTop:12,alignItems:"center",flexWrap:"wrap"}}>
+                <VoiceMicBtn onResult={(t)=>dispatch({type:"SET_JD",payload:(state.jdText+" "+t).trimStart()})} lang="en-IN"/>
                 <Btn variant="ghost" size="sm" onClick={()=>dispatch({type:"SET_JD",payload:SAMPLE_JD})}>Use sample JD</Btn>
                 <Btn variant="secondary" size="sm" onClick={()=>dispatch({type:"SET_JD",payload:""})}>Clear</Btn>
                 <div style={{flex:1}}/>
@@ -2626,13 +2692,13 @@ function SalesMode(){
       {activeTab==="setup"&&(
         <div style={{display:"flex",flexDirection:"column",gap:14,maxWidth:700}}>
           <Card style={{padding:22}}>
-            <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:12}}>Your product</div>
-            <textarea value={state.salesProduct} onChange={e=>dispatch({type:"SET_SALES_PRODUCT",payload:e.target.value})} style={{width:"100%",height:160,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} placeholder="Describe your product..." onFocus={e=>e.target.style.borderColor="#BA7517"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
+            <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>Your product <VoiceMicBtn onResult={(t)=>dispatch({type:"SET_SALES_PRODUCT",payload:(state.salesProduct+" "+t).trimStart()})} lang="en-IN" style={{marginLeft:"auto"}}/></div>
+            <textarea value={state.salesProduct} onChange={e=>dispatch({type:"SET_SALES_PRODUCT",payload:e.target.value})} style={{width:"100%",height:160,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} placeholder="Speak or type your product description..." onFocus={e=>e.target.style.borderColor="#BA7517"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
             <Btn variant="secondary" size="sm" onClick={()=>dispatch({type:"SET_SALES_PRODUCT",payload:SAMPLE_PRODUCT})} style={{marginTop:10}}>Use sample product</Btn>
           </Card>
           <Card style={{padding:22}}>
-            <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:12}}>Target audience</div>
-            <textarea value={state.salesTarget} onChange={e=>dispatch({type:"SET_SALES_TARGET",payload:e.target.value})} style={{width:"100%",height:90,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} placeholder="Industry, company size, role, pain points..." onFocus={e=>e.target.style.borderColor="#BA7517"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
+            <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:12,display:"flex",alignItems:"center",gap:8}}>Target audience <VoiceMicBtn onResult={(t)=>dispatch({type:"SET_SALES_TARGET",payload:(state.salesTarget+" "+t).trimStart()})} lang="en-IN" style={{marginLeft:"auto"}}/></div>
+            <textarea value={state.salesTarget} onChange={e=>dispatch({type:"SET_SALES_TARGET",payload:e.target.value})} style={{width:"100%",height:90,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} placeholder="Speak or type — industry, company size, role, pain points..." onFocus={e=>e.target.style.borderColor="#BA7517"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
             <Btn variant="secondary" size="sm" onClick={()=>dispatch({type:"SET_SALES_TARGET",payload:SAMPLE_TARGET})} style={{marginTop:10}}>Use sample target</Btn>
           </Card>
           <Btn variant="orange" size="lg" disabled={state.salesRunning||!state.salesProduct.trim()} onClick={generate} fullWidth>{state.salesRunning?"Generating prospects...":"Generate prospects and outreach"}</Btn>
@@ -3242,8 +3308,8 @@ function SMBMode(){
                 </div>
               ))}
               <div>
-                <div style={{fontSize:11,fontWeight:700,color:"#5F5E5A",marginBottom:4}}>Main challenge</div>
-                <textarea value={biz.problem} onChange={e=>setBiz(b=>({...b,problem:e.target.value}))} placeholder="e.g. Managing 3 stores, WhatsApp orders chaotic, no CRM, losing customers..." style={{width:"100%",height:70,border:"1px solid #EEECEA",borderRadius:9,padding:"9px 12px",fontSize:12,fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} onFocus={e=>e.target.style.borderColor="#7C3AED"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
+                <div style={{fontSize:11,fontWeight:700,color:"#5F5E5A",marginBottom:4,display:"flex",alignItems:"center",gap:8}}>Main challenge <VoiceMicBtn onResult={(t)=>setBiz(b=>({...b,problem:(b.problem+" "+t).trimStart()}))} lang="en-IN" style={{marginLeft:"auto"}}/></div>
+                <textarea value={biz.problem} onChange={e=>setBiz(b=>({...b,problem:e.target.value}))} placeholder="Speak or type — e.g. Managing 3 stores, WhatsApp orders chaotic, no CRM..." style={{width:"100%",height:70,border:"1px solid #EEECEA",borderRadius:9,padding:"9px 12px",fontSize:12,fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} onFocus={e=>e.target.style.borderColor="#7C3AED"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
               </div>
             </Card>
             <Card style={{padding:18}}>
@@ -3782,7 +3848,7 @@ function HiringHistory(){
 // ── APP SHELL ─────────────────────────────────────────────────────────────
 const HIRING_NAV=[{id:"dashboard",label:"Dashboard",icon:"⊞"},{id:"pipeline",label:"Pipeline",icon:"▶"},{id:"candidates",label:"Candidates",icon:"👥"},{id:"outreach",label:"Outreach",icon:"✉️"},{id:"interviews",label:"Interviews",icon:"💬"},{id:"report",label:"Report",icon:"📄"},{id:"history",label:"History",icon:"🕐"}];
 const HIRING_PAGES={dashboard:HiringDashboard,pipeline:HiringPipeline,candidates:HiringCandidates,outreach:HiringOutreach,interviews:HiringInterviews,report:HiringReport,history:HiringHistory};
-const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}@media(max-width:1100px){.home-grid{grid-template-columns:repeat(2,1fr)!important;}.care-grid{grid-template-columns:1fr!important;}.support-grid{grid-template-columns:1fr!important;}.hiring-layout{flex-direction:column!important;}}@media(max-width:768px){.home-grid{grid-template-columns:1fr!important;}.hero-h1{font-size:36px!important;}.hero-p{font-size:14px!important;}.mode-cards-section{padding:32px 16px!important;}.hero-section{padding:0 16px 40px!important;}.guided-path{flex-wrap:wrap!important;gap:8px!important;}.proof-pills{flex-direction:column!important;align-items:center!important;}}";
+const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}@keyframes voicePulse{0%,100%{box-shadow:0 0 0 3px rgba(239,68,68,0.3)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0.15)}}.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}@media(max-width:1100px){.home-grid{grid-template-columns:repeat(2,1fr)!important;}.care-grid{grid-template-columns:1fr!important;}.support-grid{grid-template-columns:1fr!important;}.hiring-layout{flex-direction:column!important;}}@media(max-width:768px){.home-grid{grid-template-columns:1fr!important;}.hero-h1{font-size:36px!important;}.hero-p{font-size:14px!important;}.mode-cards-section{padding:32px 16px!important;}.hero-section{padding:0 16px 40px!important;}.guided-path{flex-wrap:wrap!important;gap:8px!important;}.proof-pills{flex-direction:column!important;align-items:center!important;}}";
 
 function HiringShell(){
   const{state,dispatch}=useStore();
