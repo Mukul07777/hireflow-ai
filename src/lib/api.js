@@ -1,22 +1,70 @@
-const API_URL = 'https://api.anthropic.com/v1/messages'
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || ''
+const GROQ_MODEL = 'llama-3.3-70b-versatile'
 
 export async function callClaude(messages, system = '') {
-  const body = {
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1000,
-    messages,
-  }
-  if (system) body.system = system
+  const groqMessages = system
+    ? [{ role: 'system', content: system }, ...messages]
+    : messages
 
-  const res = await fetch(API_URL, {
+  const res = await fetch(GROQ_API_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      max_tokens: 1000,
+      messages: groqMessages,
+    }),
   })
 
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) throw new Error(`Groq API error: ${res.status}`)
   const data = await res.json()
-  return data.content?.map(b => b.text || '').join('') || ''
+  return data.choices?.[0]?.message?.content || ''
+}
+
+// Real SSE streaming — onChunk(accumulatedText, newToken)
+export async function callClaudeStream(messages, system = '', onChunk) {
+  const groqMessages = system
+    ? [{ role: 'system', content: system }, ...messages]
+    : messages
+
+  const res = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: GROQ_MODEL,
+      max_tokens: 1000,
+      messages: groqMessages,
+      stream: true,
+    }),
+  })
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let full = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    const raw = decoder.decode(value, { stream: true })
+    for (const line of raw.split('\n')) {
+      const l = line.trim()
+      if (!l.startsWith('data:')) continue
+      const d = l.slice(5).trim()
+      if (d === '[DONE]') break
+      try {
+        const token = JSON.parse(d).choices?.[0]?.delta?.content || ''
+        if (token) { full += token; onChunk(full, token) }
+      } catch {}
+    }
+  }
+  return full
 }
 
 export async function analyzeCandidate(candidate, jd) {

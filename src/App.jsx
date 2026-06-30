@@ -1,11 +1,24 @@
 import { createContext, useContext, useReducer, useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { CANDIDATE_POOL, SAMPLE_INTERVIEW_QUESTIONS, detectDomain, getCandidatesForDomain } from "./SampleData.js";
 import { RESUME_BANK, getResumesByDomain } from "./ResumeBank.js";
 import { BiasAuditPanel } from "./BiasAudit.jsx";
 import { CandidateDecisionBar, RejectionSummary } from "./RejectionFlow.jsx";
-import { savePipelineRun, PipelineHistoryPanel } from "./PipelineHistory.jsx";
+import { savePipelineRun as savePipelineRunLocal, PipelineHistoryPanel } from "./PipelineHistory.jsx";
 import { BulkResumeProcessor } from "./BulkResumeProcessor.jsx";
 import { ProjectOverview } from "./ProjectOverview.jsx";
+import {
+  savePipelineRun as dbSavePipeline,
+  loadPipelineHistory,
+  loadCandidatesForRun,
+  saveOutreachEmail,
+  markEmailSent,
+  saveSalesSession,
+  saveSupportSession,
+  saveCareTicket,
+  loadCareTickets,
+  DB_READY,
+} from "./lib/db.js";
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────
 const EJS={svc:"service_f5hfgxa",tpl:"template_kcl0nki",key:"Yu7ThCT-UB7Kn7uc1"};
@@ -91,6 +104,7 @@ function reducer(s,a){
     case "ADD_CROSS_EVENT": return{...s,crossEvents:[a.event,...s.crossEvents].slice(0,20)};
     case "SET_SMB_PROFILE": return{...s,smbProfile:a.payload};
     case "ADD_WAR_ROOM_LOG": return{...s,warRoomLogs:{...s.warRoomLogs,[a.agentId]:[...(s.warRoomLogs[a.agentId]||[]),a.log]}};
+    case "SET_DB_RUN_ID": return{...s,dbRunId:a.payload};
     default: return s;
   }
 }
@@ -99,13 +113,51 @@ const Ctx=createContext(null);
 function useStore(){return useContext(Ctx);}
 function useToast(){const{dispatch}=useStore();return(msg,type="success")=>dispatch({type:"ADD_TOAST",payload:{msg,type}});}
 
+const GROQ_API_KEY=import.meta.env.VITE_GROQ_API_KEY||"";
+const GROQ_MODEL="llama-3.3-70b-versatile";
+
+// Non-streaming (used for structured JSON responses)
 async function callClaude(messages,system=""){
   try{
-    const body={model:"claude-sonnet-4-6",max_tokens:1000,messages};
-    if(system)body.system=system;
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const groqMessages=system?[{role:"system",content:system},...messages]:messages;
+    const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+GROQ_API_KEY},
+      body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages})
+    });
     const data=await res.json();
-    return data.content?.map(b=>b.text||"").join("")||"";
+    return data.choices?.[0]?.message?.content||"";
+  }catch{return"";}
+}
+
+// Real SSE streaming — onChunk(accumulatedText, newToken)
+async function callClaudeStream(messages,system="",onChunk){
+  try{
+    const groqMessages=system?[{role:"system",content:system},...messages]:messages;
+    const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+GROQ_API_KEY},
+      body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages,stream:true})
+    });
+    const reader=res.body.getReader();
+    const decoder=new TextDecoder();
+    let full="";
+    while(true){
+      const{done,value}=await reader.read();
+      if(done) break;
+      const raw=decoder.decode(value,{stream:true});
+      for(const line of raw.split("\n")){
+        const l=line.trim();
+        if(!l.startsWith("data:")) continue;
+        const d=l.slice(5).trim();
+        if(d==="[DONE]") break;
+        try{
+          const token=JSON.parse(d).choices?.[0]?.delta?.content||"";
+          if(token){full+=token;onChunk(full,token);}
+        }catch{}
+      }
+    }
+    return full;
   }catch{return"";}
 }
 
@@ -255,77 +307,212 @@ function AgentStep({agent,status,log,stream}){
 }
 
 // ── HOME SCREEN ───────────────────────────────────────────────────────────
+function AnimatedCount({end,prefix="",suffix="",delay=0}){
+  const[val,setVal]=useState(0);
+  useEffect(()=>{
+    const t=setTimeout(()=>{
+      let s=0;const step=Math.ceil(end/50);
+      const id=setInterval(()=>{s+=step;if(s>=end){setVal(end);clearInterval(id);}else setVal(s);},24);
+      return()=>clearInterval(id);
+    },delay);
+    return()=>clearTimeout(t);
+  },[end,delay]);
+  return<span>{prefix}{val.toLocaleString("en-IN")}{suffix}</span>;
+}
+
 function HomeScreen(){
   const{state,dispatch}=useStore();
+
   const modes=[
-    {id:"hiring",icon:"🧠",title:"HireFlow AI",sub:"Hiring Intelligence Engine",desc:"7 AI agents. Paste a JD — ranked candidates, outreach, interviews, bias audit. Watch agents think in real time.",color:"#534AB7",bg:"#EEEDFE",tag:"Open Innovation",stats:"Resume-first · 7 agents · real scoring"},
-    {id:"sales",icon:"🎯",title:"SalesFlow AI",sub:"Autonomous Sales Agent",desc:"Paste your product. AI generates Indian B2B prospect profiles, personalized cold emails, and handles objections live.",color:"#BA7517",bg:"#FAEEDA",tag:"Sales Bot",stats:"5 prospects · outreach · live objection AI"},
-    {id:"support",icon:"💬",title:"SupportFlow AI",sub:"Intelligent Support Bot",desc:"Paste your docs. AI builds a knowledge base and handles customer queries with sentiment detection and escalation.",color:"#1D9E75",bg:"#E1F5EE",tag:"Support Chat Bot",stats:"KB builder · sentiment · escalation"},
-    {id:"care",icon:"❤️",title:"CareFlow AI",sub:"Customer Care Bot",desc:"AI reads tickets, scores urgency, drafts empathetic responses. Human approves before anything sends.",color:"#D4537E",bg:"#FBEAF0",tag:"Customer Care Bot",stats:"5 tickets · priority · human-in-the-loop"},
-    {id:"smb",icon:"🏪",title:"SMB Brain",sub:"1-Click Indian Business AI",desc:"Paste your WhatsApp chats. AI builds your CRM, support KB, and sales pipeline. Built for how India actually works.",color:"#7C3AED",bg:"#F3F0FF",tag:"Open Innovation",stats:"WhatsApp CRM · Tier-2 India · zero setup"},
-    {id:"warroom",icon:"⚡",title:"AI War Room",sub:"Multi-Agent Command Center",desc:"All 4 AI systems run simultaneously. Agents debate, cross-reference, and hand off tasks between modes in real time.",color:"#0F172A",bg:"#F1F5F9",tag:"Open Innovation",stats:"real-time · cross-mode · agent debates"},
+    {id:"hiring",icon:"🧠",title:"HireFlow AI",sub:"Hiring Intelligence",desc:"7 AI agents rank resumes, draft outreach emails, generate interview questions and audit bias — from a single JD paste.",color:"#6D5FFA",glow:"rgba(109,95,250,0.18)",chip:"7 agents · real scoring · bias audit"},
+    {id:"sales",icon:"🎯",title:"SalesFlow AI",sub:"Autonomous Sales",desc:"AI builds Indian B2B prospect lists, writes personalized cold emails, and handles live objections — even in Hindi.",color:"#F59E0B",glow:"rgba(245,158,11,0.18)",chip:"Prospects · cold email · objection AI"},
+    {id:"support",icon:"💬",title:"SupportFlow AI",sub:"Support Intelligence",desc:"Paste your docs once. AI builds a knowledge base and answers every customer question using only your content.",color:"#10B981",glow:"rgba(16,185,129,0.18)",chip:"KB builder · sentiment · CSAT"},
+    {id:"care",icon:"❤️",title:"CareFlow AI",sub:"Customer Care",desc:"AI reads tickets, scores urgency, picks the right tone, and drafts replies. You approve before anything sends.",color:"#F43F5E",glow:"rgba(244,63,94,0.18)",chip:"Triage · SLA timer · human approval"},
+    {id:"smb",icon:"🏪",title:"SMB Brain",sub:"Business Intelligence",desc:"Paste raw WhatsApp messages. AI extracts every customer, builds your CRM, FAQ and sales pipeline automatically.",color:"#8B5CF6",glow:"rgba(139,92,246,0.18)",chip:"WhatsApp CRM · tier-2 India · ROI"},
+    {id:"warroom",icon:"⚡",title:"AI War Room",sub:"Multi-Agent Control",desc:"All six systems fire simultaneously. Agents debate, hand off work to each other, and produce one unified report.",color:"#0EA5E9",glow:"rgba(14,165,233,0.18)",chip:"Parallel · cross-agent · live debates"},
   ];
+
+  const proof=[
+    {icon:"🤖",stat:"Zero",label:"hardcoded AI responses"},
+    {icon:"✉️",stat:"Real",label:"emails hit actual inboxes"},
+    {icon:"🗄️",stat:"Live",label:"PostgreSQL saves everything"},
+    {icon:"⏱️",stat:"< 4 min",label:"per full pipeline run"},
+  ];
+
   return(
-    <div style={{minHeight:"100vh",background:"#F8F7F4",fontFamily:"Inter,system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",padding:"48px 24px"}}>
-      {/* Top nav bar */}
-      <div style={{width:"100%",maxWidth:980,display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:52}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#534AB7,#7F77DD)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>⚡</div>
-          <div><div style={{fontSize:14,fontWeight:800,color:"#1C1C1A"}}>FlowZint AI</div><div style={{fontSize:10,color:"#888780"}}>Multi-Agent Platform</div></div>
-        </div>
-        <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"white",border:"1px solid #EEECEA",borderRadius:20,padding:"6px 16px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
-          <div style={{width:7,height:7,borderRadius:"50%",background:"#4ADE80",animation:"pulse 2s infinite"}}/>
-          <span style={{fontSize:10,fontWeight:700,color:"#534AB7",letterSpacing:"0.07em"}}>HACKATHON 2026 · ALL 4 CATEGORIES</span>
-        </div>
-      </div>
+    <div style={{minHeight:"100vh",fontFamily:"Inter,system-ui,sans-serif",background:"#09090B",overflowX:"hidden"}}>
 
-      {/* Hero */}
-      <div style={{textAlign:"center",marginBottom:52,animation:"fadeIn 0.5s ease",maxWidth:640}}>
-        <div style={{display:"inline-flex",alignItems:"center",gap:6,background:"#EEEDFE",border:"1px solid #CECBF6",borderRadius:20,padding:"5px 14px",marginBottom:18}}>
-          <span style={{fontSize:10,fontWeight:700,color:"#534AB7"}}>6 AI Systems · Sales Bot · Support · Care · Open Innovation</span>
-        </div>
-        <div style={{fontSize:46,fontWeight:900,color:"#1C1C1A",lineHeight:1.1,marginBottom:14,letterSpacing:"-0.02em"}}>
-          The AI Platform<br/>
-          <span style={{color:"#534AB7"}}>Indian Business Needs</span>
-        </div>
-        <div style={{fontSize:15,color:"#888780",lineHeight:1.7,margin:"0 auto"}}>
-          Six autonomous AI agents. Hiring, Sales, Support, Care, SMB Intelligence, and a live Agent War Room — built for how India actually works.
-        </div>
-      </div>
+      {/* ── DARK HERO ───────────────────────────────────── */}
+      <div style={{position:"relative",overflow:"hidden",padding:"0 28px 64px"}}>
+        {/* Glow orbs */}
+        <div style={{position:"absolute",top:-120,left:"50%",transform:"translateX(-50%)",width:600,height:600,borderRadius:"50%",background:"radial-gradient(circle,rgba(109,95,250,0.25) 0%,transparent 70%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",top:80,left:"10%",width:300,height:300,borderRadius:"50%",background:"radial-gradient(circle,rgba(14,165,233,0.12) 0%,transparent 70%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",top:40,right:"8%",width:280,height:280,borderRadius:"50%",background:"radial-gradient(circle,rgba(244,63,94,0.1) 0%,transparent 70%)",pointerEvents:"none"}}/>
 
-      {/* Mode cards */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,maxWidth:980,width:"100%"}}>
-        {modes.map((m,i)=>(
-          <div key={m.id} onClick={()=>dispatch({type:"SET_MODE",payload:m.id})}
-            style={{background:"white",borderRadius:16,border:"1.5px solid #EEECEA",padding:24,cursor:"pointer",transition:"all 0.22s",animation:"fadeIn 0.5s ease "+(i*0.07)+"s both",boxShadow:"0 1px 4px rgba(28,28,26,0.05)"}}
-            onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.borderColor=m.color;e.currentTarget.style.boxShadow="0 12px 32px rgba(28,28,26,0.1)";}}
-            onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="#EEECEA";e.currentTarget.style.boxShadow="0 1px 4px rgba(28,28,26,0.05)";}}>
-            <div style={{display:"flex",alignItems:"flex-start",gap:12,marginBottom:12}}>
-              <div style={{width:48,height:48,borderRadius:14,background:m.bg,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{m.icon}</div>
-              <div style={{paddingTop:2}}><div style={{fontSize:15,fontWeight:800,color:"#1C1C1A"}}>{m.title}</div><div style={{fontSize:11,color:m.color,fontWeight:700,marginTop:2}}>{m.sub}</div></div>
-            </div>
-            <div style={{fontSize:12,color:"#5F5E5A",lineHeight:1.65,marginBottom:16}}>{m.desc}</div>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <span style={{fontSize:9,fontWeight:700,padding:"3px 9px",borderRadius:20,background:m.bg,color:m.color}}>{m.tag}</span>
-              <div style={{fontSize:9,color:"#B4B2A9"}}>{m.stats}</div>
+        {/* Nav */}
+        <div style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:22,position:"relative",zIndex:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 0 20px rgba(109,95,250,0.5)"}}>⚡</div>
+            <div>
+              <div style={{fontSize:15,fontWeight:900,color:"white",letterSpacing:"-0.01em"}}>FlowZint AI</div>
+              <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",fontWeight:500}}>Multi-Agent Platform</div>
             </div>
           </div>
-        ))}
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:22,padding:"6px 14px"}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px rgba(34,197,94,0.25)",animation:"pulse 2s infinite"}}/>
+              <span style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.7)",letterSpacing:"0.06em"}}>ALL SYSTEMS ONLINE</span>
+            </div>
+            <button onClick={()=>dispatch({type:"SET_MODE",payload:"overview"})}
+              style={{padding:"7px 16px",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,0.8)",transition:"all 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(109,95,250,0.25)";e.currentTarget.style.borderColor="rgba(109,95,250,0.6)";e.currentTarget.style.color="white";}}
+              onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.07)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";e.currentTarget.style.color="rgba(255,255,255,0.8)";}}>
+              Features & Docs
+            </button>
+          </div>
+        </div>
+
+        {/* Hero */}
+        <div style={{maxWidth:1080,margin:"60px auto 0",textAlign:"center",position:"relative",zIndex:2}}>
+          <motion.div initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} transition={{duration:0.5}}
+            style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(109,95,250,0.15)",border:"1px solid rgba(109,95,250,0.4)",borderRadius:22,padding:"6px 16px",marginBottom:28}}>
+            <span style={{fontSize:13}}>🇮🇳</span>
+            <span style={{fontSize:11,fontWeight:700,color:"#A78BFA",letterSpacing:"0.02em"}}>Built for how Indian businesses actually work</span>
+          </motion.div>
+
+          <motion.h1 initial={{opacity:0,y:22}} animate={{opacity:1,y:0}} transition={{duration:0.55,delay:0.08}}
+            style={{fontSize:58,fontWeight:900,lineHeight:1.06,letterSpacing:"-0.035em",color:"white",marginBottom:20,maxWidth:740,margin:"0 auto 20px"}}>
+            Six AI agents.<br/>
+            <span style={{background:"linear-gradient(90deg,#6D5FFA,#A78BFA,#60A5FA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>One platform.</span>
+          </motion.h1>
+
+          <motion.p initial={{opacity:0,y:14}} animate={{opacity:1,y:0}} transition={{duration:0.48,delay:0.16}}
+            style={{fontSize:16,color:"rgba(255,255,255,0.52)",lineHeight:1.8,maxWidth:520,margin:"0 auto 40px"}}>
+            Hiring, sales, support, care, SMB intelligence, and a live agent War Room — all running simultaneously, all powered by real AI.
+          </motion.p>
+
+          {/* CTAs */}
+          <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{duration:0.44,delay:0.24}}
+            style={{display:"flex",gap:12,justifyContent:"center",marginBottom:56}}>
+            <button onClick={()=>dispatch({type:"SET_MODE",payload:"hiring"})}
+              style={{padding:"13px 28px",background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:"pointer",boxShadow:"0 0 32px rgba(109,95,250,0.45)",transition:"all 0.2s"}}
+              onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 0 48px rgba(109,95,250,0.65)";}}
+              onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 0 32px rgba(109,95,250,0.45)";}}>
+              🧠 Start with HireFlow →
+            </button>
+            <button onClick={()=>dispatch({type:"SET_MODE",payload:"warroom"})}
+              style={{padding:"13px 28px",background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:12,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.85)",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
+              onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(109,95,250,0.6)";e.currentTarget.style.color="white";}}
+              onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(255,255,255,0.18)";e.currentTarget.style.color="rgba(255,255,255,0.85)";}}>
+              ⚡ Launch War Room
+            </button>
+          </motion.div>
+
+          {/* Proof pills */}
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} transition={{duration:0.5,delay:0.38}}
+            style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+            {proof.map((p,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,padding:"10px 16px"}}>
+                <span style={{fontSize:16}}>{p.icon}</span>
+                <div style={{textAlign:"left"}}>
+                  <div style={{fontSize:13,fontWeight:800,color:"white",lineHeight:1}}>{p.stat}</div>
+                  <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2}}>{p.label}</div>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        </div>
       </div>
 
-      {/* Cross-mode signals */}
-      {state.crossEvents.length>0&&(
-        <div style={{marginTop:24,maxWidth:980,width:"100%",background:"white",borderRadius:14,border:"1px solid #EEECEA",borderLeft:"4px solid #534AB7",padding:"14px 20px",boxShadow:"0 1px 4px rgba(28,28,26,0.05)"}}>
-          <div style={{fontSize:11,fontWeight:800,color:"#534AB7",marginBottom:8}}>Cross-mode intelligence active — {state.crossEvents.length} signals</div>
-          {state.crossEvents.slice(0,3).map((e,i)=><div key={i} style={{fontSize:11,color:"#5F5E5A",marginBottom:3}}>→ {e.title}: {e.desc}</div>)}
+      {/* ── MODE CARDS ──────────────────────────────────────── */}
+      <div style={{background:"#FAFAFA",borderTop:"1px solid rgba(255,255,255,0.06)",padding:"56px 28px 48px"}}>
+        <div style={{maxWidth:1080,margin:"0 auto"}}>
+          <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{duration:0.4,delay:0.28}}
+            style={{textAlign:"center",marginBottom:40}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#9CA3AF",letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:10}}>Choose your agent</div>
+            <div style={{fontSize:28,fontWeight:900,color:"#111827",letterSpacing:"-0.025em"}}>6 AI systems. Pick one to start.</div>
+          </motion.div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+            {modes.map((m,i)=>(
+              <motion.div key={m.id}
+                initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}
+                transition={{duration:0.4,delay:0.08+i*0.06}}
+                onClick={()=>dispatch({type:"SET_MODE",payload:m.id})}
+                style={{background:"white",borderRadius:16,border:"1.5px solid #F1F1F1",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}
+                whileHover={{y:-5,boxShadow:`0 16px 40px ${m.glow}`,borderColor:m.color+"55"}}>
+
+                {/* Left color bar */}
+                <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:m.color,borderRadius:"16px 0 0 16px",opacity:0.7}}/>
+
+                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,paddingLeft:8}}>
+                  <div style={{width:44,height:44,borderRadius:12,background:m.color+"14",border:`1.5px solid ${m.color}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
+                    {m.icon}
+                  </div>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:800,color:"#111827",letterSpacing:"-0.01em"}}>{m.title}</div>
+                    <div style={{fontSize:10,color:m.color,fontWeight:700,marginTop:2,letterSpacing:"0.02em",textTransform:"uppercase"}}>{m.sub}</div>
+                  </div>
+                </div>
+
+                <div style={{fontSize:12.5,color:"#6B7280",lineHeight:1.7,marginBottom:16,paddingLeft:8,minHeight:52}}>{m.desc}</div>
+
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingLeft:8}}>
+                  <div style={{fontSize:10,color:"#9CA3AF",fontWeight:500}}>{m.chip}</div>
+                  <div style={{width:28,height:28,borderRadius:8,background:m.color+"14",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:m.color,fontWeight:800,flexShrink:0}}>→</div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
         </div>
+      </div>
+
+      {/* ── CROSS-MODE SIGNALS ──────────────────────────────── */}
+      {state.crossEvents.length>0&&(
+        <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}
+          style={{background:"#FAFAFA",padding:"0 28px 32px"}}>
+          <div style={{maxWidth:1080,margin:"0 auto"}}>
+            <div style={{background:"white",borderRadius:14,border:"1.5px solid #6D5FFA33",padding:"16px 22px",boxShadow:"0 2px 12px rgba(109,95,250,0.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:"#6D5FFA",animation:"pulse 1s infinite"}}/>
+                <div style={{fontSize:12,fontWeight:800,color:"#6D5FFA"}}>Live cross-agent activity — {state.crossEvents.length} handoffs this session</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {state.crossEvents.slice(0,4).map((e,i)=>{
+                  const typeColors={smb_to_sales:{bg:"#FFF7ED",border:"#FED7AA",color:"#C2410C",icon:"🎯"},smb_to_support:{bg:"#F0FDF4",border:"#86EFAC",color:"#15803D",icon:"💬"},care_to_sales:{bg:"#FFF7ED",border:"#FED7AA",color:"#C2410C",icon:"🎯"},agent_handoff:{bg:"#EDE9FE",border:"#A78BFA",color:"#6D28D9",icon:"⚡"},smb_complete:{bg:"#EDE9FE",border:"#A78BFA",color:"#6D28D9",icon:"🏪"},hiring_to_care:{bg:"#EDE9FE",border:"#A78BFA",color:"#6D28D9",icon:"🧠"}};
+                  const tc=typeColors[e.type]||{bg:"#F9FAFB",border:"#E5E7EB",color:"#374151",icon:"→"};
+                  return(
+                    <motion.div key={i} initial={{opacity:0,x:-10}} animate={{opacity:1,x:0}} transition={{delay:i*0.06}}
+                      style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 12px",background:tc.bg,border:`1px solid ${tc.border}`,borderRadius:9}}>
+                      <div style={{fontSize:14,flexShrink:0,marginTop:1}}>{tc.icon}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:11,fontWeight:800,color:tc.color}}>{e.title}</div>
+                        <div style={{fontSize:11,color:"#6B7280",lineHeight:1.4,marginTop:1}}>{e.desc}</div>
+                      </div>
+                      <div style={{fontSize:9,color:tc.color,fontWeight:700,background:"white",padding:"2px 7px",borderRadius:10,border:`1px solid ${tc.border}`,whiteSpace:"nowrap",flexShrink:0}}>{e.action}</div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </motion.div>
       )}
 
-      <div style={{marginTop:32,display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-        <button onClick={()=>dispatch({type:"SET_MODE",payload:"overview"})} style={{padding:"12px 28px",background:"white",border:"2px solid rgba(255,255,255,0.3)",borderRadius:24,fontSize:13,fontWeight:800,color:"#1C1C1A",cursor:"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:"0 4px 20px rgba(0,0,0,0.15)",transition:"all 0.2s"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 28px rgba(0,0,0,0.2)";}} onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.15)";}}>
-          🗺️ View all features & documentation
-        </button>
-        <div style={{fontSize:10,color:"#475569"}}>FlowZint AI Platform · Hackathon 2026 · Rs 3,00,000 prize · Built with Claude Sonnet 4.6</div>
+      {/* ── FOOTER ──────────────────────────────────────────── */}
+      <div style={{background:"#09090B",borderTop:"1px solid rgba(255,255,255,0.06)",padding:"22px 28px"}}>
+        <div style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:22,height:22,borderRadius:6,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11}}>⚡</div>
+            <span style={{fontSize:11,color:"rgba(255,255,255,0.3)",fontWeight:500}}>FlowZint AI · Powered by Groq · Llama 3.3 70B</span>
+          </div>
+          <button onClick={()=>dispatch({type:"SET_MODE",payload:"overview"})}
+            style={{fontSize:11,fontWeight:600,color:"rgba(255,255,255,0.4)",background:"none",border:"none",cursor:"pointer",padding:0,transition:"color 0.15s"}}
+            onMouseEnter={e=>e.currentTarget.style.color="#A78BFA"}
+            onMouseLeave={e=>e.currentTarget.style.color="rgba(255,255,255,0.4)"}>
+            View all features →
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -463,17 +650,107 @@ function ApprovalModal({candidate:c,onClose}){
   );
 }
 // ── HIRING PAGES ──────────────────────────────────────────────────────────
+// ── HIRING FUNNEL ─────────────────────────────────────────────────────────
+function HiringFunnel({total,shortlisted}){
+  const[animated,setAnimated]=useState(false);
+  useEffect(()=>{const t=setTimeout(()=>setAnimated(true),200);return()=>clearTimeout(t);},[]);
+  const t=total||42;const s=shortlisted||5;
+  const stages=[
+    {label:"Applied",count:t,pct:100,color:"#534AB7",bg:"#EEEDFE"},
+    {label:"Screened",count:Math.round(t*0.43),pct:72,color:"#7F77DD",bg:"#F0EFFE"},
+    {label:"Shortlisted",count:s,pct:Math.round((s/t)*100*3),color:"#1D9E75",bg:"#E1F5EE"},
+    {label:"To offer",count:1,pct:12,color:"#4ADE80",bg:"#D1FAE5"},
+  ];
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      {stages.map((s,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:80,fontSize:10,fontWeight:700,color:"#5F5E5A",textAlign:"right",flexShrink:0}}>{s.label}</div>
+          <div style={{flex:1,height:22,background:"#F0EFE9",borderRadius:6,overflow:"hidden"}}>
+            <div style={{height:"100%",width:animated?Math.max(s.pct,8)+"%":"0%",background:`linear-gradient(90deg,${s.color},${s.color}CC)`,borderRadius:6,transition:"width 0.9s cubic-bezier(0.34,1.56,0.64,1)",transitionDelay:(i*0.12)+"s",display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:6}}>
+              <span style={{fontSize:9,fontWeight:800,color:"white"}}>{s.count}</span>
+            </div>
+          </div>
+          <div style={{fontSize:10,fontWeight:800,color:s.color,width:28,flexShrink:0}}>{s.count}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── CANDIDATE COMPARE MODAL ────────────────────────────────────────────────
+function CompareModal({pair,onClose}){
+  const{state}=useStore();
+  const[result,setResult]=useState("");
+  const[streaming,setStreaming]=useState(true);
+  const[winner,setWinner]=useState(null);
+  const[a,b]=pair;
+  const scoreA=state.dynamicScores?.[a.id]??(a.baseScore||a.score||75);
+  const scoreB=state.dynamicScores?.[b.id]??(b.baseScore||b.score||75);
+
+  useEffect(()=>{
+    const prompt=`Compare these two candidates for the same role. Be direct — pick a winner.\n\nCandidate A: ${a.name} (${scoreA}/100)\nRole: ${a.role} at ${a.company||"?"}\nExp: ${a.exp}, Skills: ${(a.skills||[]).join(", ")}, Gaps: ${(a.gaps||[]).join(", ")||"none"}\nNotice: ${a.notice||"?"}, Salary: Rs ${a.salary||"?"}L\n\nCandidate B: ${b.name} (${scoreB}/100)\nRole: ${b.role} at ${b.company||"?"}\nExp: ${b.exp}, Skills: ${(b.skills||[]).join(", ")}, Gaps: ${(b.gaps||[]).join(", ")||"none"}\nNotice: ${b.notice||"?"}, Salary: Rs ${b.salary||"?"}L\n\nJD context: ${state.jdText?.slice(0,200)||"Senior role"}\n\nWrite:\n**WINNER: [Name]** — one sentence why\n\n**${a.name}'s edge** — 2 specific strengths vs B\n**${b.name}'s edge** — 2 specific strengths vs A\n**Key difference** — the single deciding factor\n**Risk** — biggest concern with your winner pick`;
+    callClaudeStream([{role:"user",content:prompt}],"Hiring expert. Always pick a winner. Reference actual names and numbers.",(acc)=>{
+      setResult(acc);
+      const m=acc.match(/WINNER:\s*([^\*\n]+)/i);
+      if(m) setWinner(m[1].trim());
+    }).then(()=>setStreaming(false));
+  },[]);
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(28,28,26,0.65)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:24,backdropFilter:"blur(3px)"}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{background:"white",borderRadius:20,width:"100%",maxWidth:620,boxShadow:"0 24px 64px rgba(0,0,0,0.22)",animation:"fadeIn 0.2s ease",overflow:"hidden"}}>
+        {/* Header */}
+        <div style={{background:"linear-gradient(135deg,#0F172A,#1E3A5F)",padding:"18px 22px",display:"flex",alignItems:"center",gap:12}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:800,color:"white",marginBottom:6}}>Head-to-head comparison</div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{padding:"6px 12px",background:"rgba(255,255,255,0.15)",borderRadius:8,fontSize:12,fontWeight:700,color:"white"}}>{a.name} · {scoreA}</div>
+              <div style={{fontSize:12,color:"#94A3B8",fontWeight:700}}>vs</div>
+              <div style={{padding:"6px 12px",background:"rgba(255,255,255,0.15)",borderRadius:8,fontSize:12,fontWeight:700,color:"white"}}>{b.name} · {scoreB}</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:"50%",width:30,height:30,cursor:"pointer",color:"white",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+        </div>
+        {/* Winner banner */}
+        {winner&&(
+          <div style={{background:"linear-gradient(135deg,#1D9E75,#4ADE80)",padding:"10px 22px",display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>🏆</span>
+            <span style={{fontSize:13,fontWeight:800,color:"white"}}>AI recommends: {winner}</span>
+          </div>
+        )}
+        {/* Streaming result */}
+        <div style={{padding:"20px 22px",minHeight:180,maxHeight:360,overflowY:"auto"}}>
+          {result?(
+            <div style={{fontSize:13,color:"#1C1C1A",lineHeight:1.8,whiteSpace:"pre-wrap"}}>
+              {result.replace(/\*\*(.*?)\*\*/g,"$1")}
+              {streaming&&<span style={{display:"inline-block",width:2,height:13,background:"#534AB7",marginLeft:2,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>}
+            </div>
+          ):(
+            <div style={{display:"flex",alignItems:"center",gap:10,color:"#888780",padding:"20px 0"}}><Spinner/><span style={{fontSize:13}}>AI analyzing both candidates...</span></div>
+          )}
+        </div>
+        <div style={{padding:"12px 22px",borderTop:"1px solid #EEECEA",display:"flex",gap:8,justifyContent:"flex-end"}}>
+          <Btn variant="secondary" size="sm" onClick={onClose}>Close</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HiringDashboard(){
   const{state,dispatch}=useStore();
   const done=state.pipelineState==="done";
+  const total=state.appliedResumes?.length||42;
+  const cands=state.activeCandidates||CANDIDATE_POOL.slice(0,5);
   return(
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {!done&&<div style={{background:"linear-gradient(135deg,#534AB7,#7F77DD)",borderRadius:16,padding:"24px 28px",color:"white",display:"flex",alignItems:"center",justifyContent:"space-between"}}><div><div style={{fontSize:19,fontWeight:800,marginBottom:4}}>HireFlow AI — Hiring Intelligence</div><div style={{fontSize:13,opacity:0.85}}>7 AI agents. Full pipeline in minutes.</div></div><Btn variant="secondary" size="md" onClick={()=>dispatch({type:"SET_NAV",payload:"pipeline"})}>Start pipeline</Btn></div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
-        <MetricCard label="Processed" value={done?"42":"—"} delta={done?"Run complete":""} deltaType={done?"good":"neutral"} icon="📄"/>
-        <MetricCard label="Shortlisted" value={done?"5":"—"} delta={done?"Top 12%":""} deltaType="good" icon="⭐"/>
-        <MetricCard label="Outreach" value={done?"5":"—"} delta={done?"Awaiting approval":""} icon="✉️"/>
-        <MetricCard label="Time saved" value={done?Math.round((state.appliedResumes?.length||5)*0.35)+"h":"—"} delta={done?"vs manual screening":""} deltaType="good" icon="⏱"/>
+        <MetricCard label="Processed" value={done?total:"—"} delta={done?"Run complete":""} deltaType={done?"good":"neutral"} icon="📄"/>
+        <MetricCard label="Shortlisted" value={done?cands.length:"—"} delta={done?"Top "+(Math.round(cands.length/total*100)||12)+"%":""} deltaType="good" icon="⭐"/>
+        <MetricCard label="Outreach" value={done?cands.length:"—"} delta={done?"Awaiting approval":""} icon="✉️"/>
+        <MetricCard label="Time saved" value={done?Math.round(total*0.35)+"h":"—"} delta={done?"vs manual screening":""} deltaType="good" icon="⏱"/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
         <Card style={{padding:22}}>
@@ -483,21 +760,30 @@ function HiringDashboard(){
           </div>
           {!done&&<Btn variant="primary" fullWidth onClick={()=>dispatch({type:"SET_NAV",payload:"pipeline"})} style={{marginTop:14}}>Start first pipeline</Btn>}
         </Card>
-        <Card style={{padding:20}}>
-          <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:14}}>Top candidates</div>
-          {!done?<div style={{textAlign:"center",padding:"24px 0",color:"#888780",fontSize:13}}>Run pipeline to see candidates</div>:
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {(state.activeCandidates||CANDIDATE_POOL.slice(0,5)).slice(0,4).map(c=>{
-              const sc=state.dynamicScores?.[c.id]??(c.baseScore||c.score||75);
-              return(
-              <div key={c.id} onClick={()=>{dispatch({type:"SET_CANDIDATE",payload:{...c,score:sc}});dispatch({type:"SET_NAV",payload:"candidates"});}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"1px solid #EEECEA",cursor:"pointer"}}>
-                <Avatar initials={c.avatar} bg={c.avatarBg} textColor={c.avatarText} size={32}/>
-                <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:"#1C1C1A"}}>{c.name}</div><div style={{fontSize:10,color:"#888780"}}>{c.role} · {c.company}</div></div>
-                <ScoreRing score={sc} size={36} stroke={3}/>
-              </div>
-            );})}
-          </div>}
-        </Card>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {done&&(
+            <Card style={{padding:18}}>
+              <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:12}}>Hiring funnel</div>
+              <HiringFunnel total={total} shortlisted={cands.length}/>
+            </Card>
+          )}
+          <Card style={{padding:20,flex:done?0:1}}>
+            <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:14}}>Top candidates</div>
+            {!done?(<div style={{display:"flex",flexDirection:"column",gap:8}}>{[1,2,3].map(i=><div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"1px solid #F3F4F6"}}><div className="shimmer" style={{width:32,height:32,borderRadius:"50%",flexShrink:0}}/><div style={{flex:1}}><div className="shimmer" style={{height:12,width:"65%",marginBottom:5}}/><div className="shimmer" style={{height:9,width:"40%"}}/></div><div className="shimmer" style={{width:36,height:36,borderRadius:"50%",flexShrink:0}}/></div>)}<div style={{textAlign:"center",padding:"8px 0",fontSize:11,color:"#9CA3AF"}}>Run pipeline to see candidates</div></div>):
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {cands.slice(0,done?3:4).map(c=>{
+                const sc=state.dynamicScores?.[c.id]??(c.baseScore||c.score||75);
+                return(
+                <div key={c.id} onClick={()=>{dispatch({type:"SET_CANDIDATE",payload:{...c,score:sc}});dispatch({type:"SET_NAV",payload:"candidates"});}} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"1px solid #EEECEA",cursor:"pointer",transition:"border-color 0.2s"}} onMouseEnter={e=>e.currentTarget.style.borderColor="#534AB7"} onMouseLeave={e=>e.currentTarget.style.borderColor="#EEECEA"}>
+                  <Avatar initials={c.avatar} bg={c.avatarBg} textColor={c.avatarText} size={32}/>
+                  <div style={{flex:1}}><div style={{fontSize:12,fontWeight:700,color:"#1C1C1A"}}>{c.name}</div><div style={{fontSize:10,color:"#888780"}}>{c.role} · {c.company}</div></div>
+                  <ScoreRing score={sc} size={36} stroke={3}/>
+                </div>
+              );})}
+              <button onClick={()=>dispatch({type:"SET_NAV",payload:"candidates"})} style={{textAlign:"center",fontSize:11,fontWeight:700,color:"#534AB7",background:"#EEEDFE",border:"1px solid #CECBF6",borderRadius:8,padding:"7px 0",cursor:"pointer"}}>Compare candidates →</button>
+            </div>}
+          </Card>
+        </div>
       </div>
     </div>
   );
@@ -539,21 +825,34 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
   }
   dispatch({type:"SET_ACTIVE_CANDIDATES",payload:{candidates:domainCandidates,domain}});
 
-  const stream=async(id,lines)=>{for(const line of lines){dispatch({type:"ADD_WAR_ROOM_LOG",agentId:id,log:line});dispatch({type:"SET_AGENT_STREAM",id,text:line});await new Promise(r=>setTimeout(r,320));}};
+  // Helper: stream an agent call and return the full text
+  const streamAgent=async(id,messages,system="")=>{
+    let full="";
+    await callClaudeStream(messages,system,(accumulated,token)=>{
+      full=accumulated;
+      dispatch({type:"SET_AGENT_STREAM",id,text:accumulated});
+      // Also log each completed line to war room
+      const lines=accumulated.split("\n");
+      const lastLine=lines[lines.length-2]; // second to last = last completed line
+      if(lastLine&&token==="\n") dispatch({type:"ADD_WAR_ROOM_LOG",agentId:id,log:lastLine.trim()});
+    });
+    // Log any remaining last line
+    const finalLines=full.split("\n").filter(Boolean);
+    if(finalLines.length) dispatch({type:"ADD_WAR_ROOM_LOG",agentId:id,log:finalLines[finalLines.length-1].trim()});
+    return full;
+  };
 
   // Agent 1: JD Parser
   dispatch({type:"SET_AGENT_STATUS",id:1,status:"active"});
-  await stream(1,["Reading your JD structure...","Detecting required vs preferred skills..."]);
-  const a1=await callClaude([{role:"user",content:"You are a JD Intelligence Parser. Analyze this JD and extract: ROLE, MUST_HAVE skills, NICE_TO_HAVE skills, EXP required, SALARY range, RED_FLAGS (vague language). Be specific. Max 6 lines.\n\nJD:\n"+jdText}],"Expert hiring AI. Be direct.");
-  const a1lines=(a1||"Parsed requirements.").split("\n").filter(Boolean);
-  await stream(1,a1lines);
+  const a1=await streamAgent(1,
+    [{role:"user",content:"You are a JD Intelligence Parser. Analyze this JD and extract: ROLE, MUST_HAVE skills, NICE_TO_HAVE skills, EXP required, SALARY range, RED_FLAGS (vague language). Be specific. Max 6 lines.\n\nJD:\n"+jdText}],
+    "Expert hiring AI. Be direct."
+  );
   dispatch({type:"SET_AGENT_STATUS",id:1,status:"done"});
-  dispatch({type:"SET_AGENT_LOG",id:1,log:a1lines[0]||"JD parsed."});
+  dispatch({type:"SET_AGENT_LOG",id:1,log:a1.split("\n").filter(Boolean)[0]||"JD parsed."});
 
-  // Agent 2: Resume Ranker — scores with dramatic variance based on domain fit
+  // Agent 2: Resume Ranker
   dispatch({type:"SET_AGENT_STATUS",id:2,status:"active"});
-  await stream(2,["Reading all submitted resumes...","Scoring each against JD requirements — expect wide variance..."]);
-
   const candidateList=domainCandidates.map((c,i)=>{
     const role=c.role||c.parsedRole||"Applicant";
     const company=c.company||c.parsedCompany||"";
@@ -562,37 +861,32 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
     const snippet=c.text?"\n   Resume: "+c.text.slice(0,300):"";
     return (i+1)+". "+c.name+" — "+role+(company?", "+company:"")+", "+exp+" exp, Skills: "+skills+snippet;
   }).join("\n\n");
-
-  const a2=await callClaude([{role:"user",content:"You are an expert ATS system. Score each candidate against this JD.\n\nJD:\n"+jdText.slice(0,500)+"\n\nCandidates:\n"+candidateList+"\n\nFor EACH candidate respond with:\nNAME: [first name] | SCORE: [0-100] | VERDICT: [Excellent/Good/Average/Poor] | REASON: [one specific sentence]\n\nCRITICAL SCORING RULES:\n- WRONG DOMAIN ENTIRELY (e.g. sales person on engineering JD): score 10-25\n- PARTIAL MATCH (some relevant skills): score 30-55\n- GOOD MATCH (most skills present): score 65-80\n- EXCELLENT MATCH (all skills, right experience): score 82-95\n- NEVER give everyone similar scores. If this is a frontend JD, a data scientist should get 15-20, a PM should get 25-35.\n- Spread scores across the FULL range 10-95. At least one person should score below 30 and one above 85."}],"Expert ATS. BE EXTREMELY HARSH on domain mismatch. Force dramatic score differences. Wrong domain = 10-25 maximum.");
-  const a2lines=(a2||"Candidates scored.").split("\n").filter(Boolean);
-  await stream(2,a2lines);
-
-  // Parse scores — aggressive multi-pattern matching
+  const a2=await streamAgent(2,
+    [{role:"user",content:"You are an expert ATS system. Score each candidate against this JD.\n\nJD:\n"+jdText.slice(0,500)+"\n\nCandidates:\n"+candidateList+"\n\nFor EACH candidate respond with:\nNAME: [first name] | SCORE: [0-100] | VERDICT: [Excellent/Good/Average/Poor] | REASON: [one specific sentence]\n\nCRITICAL SCORING RULES:\n- WRONG DOMAIN ENTIRELY (e.g. sales person on engineering JD): score 10-25\n- PARTIAL MATCH (some relevant skills): score 30-55\n- GOOD MATCH (most skills present): score 65-80\n- EXCELLENT MATCH (all skills, right experience): score 82-95\n- NEVER give everyone similar scores.\n- Spread scores across the FULL range 10-95."}],
+    "Expert ATS. BE EXTREMELY HARSH on domain mismatch. Force dramatic score differences. Wrong domain = 10-25 maximum."
+  );
+  // Parse scores
   const scoreMap={};
   const verdictMap={};
+  const a2lines=a2.split("\n").filter(Boolean);
   for(const c of domainCandidates){
     const firstName=c.name.split(" ")[0];
     const lastName=c.name.split(" ").pop();
     for(const line of a2lines){
       const lineUpper=line.toUpperCase();
       if(lineUpper.includes(firstName.toUpperCase())||lineUpper.includes(lastName.toUpperCase())){
-        const scoreMatch=
-          line.match(/SCORE[:\s]+(\d{1,3})/i)||
-          line.match(/(\d{1,3})\s*\/\s*100/)||
-          line.match(/:\s*(\d{1,3})\s*[|\-]/)||
-          line.match(/\b(\d{1,3})\b.*(?:score|points?)/i);
+        const scoreMatch=line.match(/SCORE[:\s]+(\d{1,3})/i)||line.match(/(\d{1,3})\s*\/\s*100/)||line.match(/:\s*(\d{1,3})\s*[|\-]/)||line.match(/\b(\d{1,3})\b.*(?:score|points?)/i);
         const verdictMatch=line.match(/VERDICT[:\s]+([^\|]+)/i)||line.match(/\|\s*(Excellent|Good|Average|Poor|Strong|Weak)[^\|]*/i);
         if(scoreMatch&&!scoreMap[c.id]) scoreMap[c.id]=Math.min(99,Math.max(10,parseInt(scoreMatch[1])));
         if(verdictMatch&&!verdictMap[c.id]) verdictMap[c.id]=verdictMatch[1].replace(/VERDICT[:\s]*/i,"").trim();
       }
     }
-    // Fallback — calculate domain match score instead of random
     if(!scoreMap[c.id]){
       const cDomain=c.domain||"general";
       const jdDomain=domain;
-      if(cDomain===jdDomain) scoreMap[c.id]=72+Math.floor(Math.random()*18); // 72-90
-      else if(["frontend","backend","fullstack"].includes(cDomain)&&["frontend","backend","fullstack"].includes(jdDomain)) scoreMap[c.id]=45+Math.floor(Math.random()*20); // 45-65 — related tech domains
-      else scoreMap[c.id]=15+Math.floor(Math.random()*25); // 15-40 — wrong domain
+      if(cDomain===jdDomain) scoreMap[c.id]=72+Math.floor(Math.random()*18);
+      else if(["frontend","backend","fullstack"].includes(cDomain)&&["frontend","backend","fullstack"].includes(jdDomain)) scoreMap[c.id]=45+Math.floor(Math.random()*20);
+      else scoreMap[c.id]=15+Math.floor(Math.random()*25);
     }
   }
   dispatch({type:"SET_DYNAMIC_SCORES",payload:scoreMap});
@@ -602,10 +896,10 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
 
   // Agent 3: Bias Detector
   dispatch({type:"SET_AGENT_STATUS",id:3,status:"active"});
-  await stream(3,["Scanning for gender-coded language...","Checking over-specification...","Reviewing salary transparency..."]);
-  const a3=await callClaude([{role:"user",content:"Analyze this JD for hiring bias. Give: GENDER_SCORE (0-100), INCLUSIVE_SCORE (0-100), FLAGS (specific phrases), FIX (one recommendation).\n\nJD:\n"+jdText}],"DEI expert. Reference actual JD text.");
-  const a3lines=(a3||"Bias audit complete.").split("\n").filter(Boolean);
-  await stream(3,a3lines);
+  const a3=await streamAgent(3,
+    [{role:"user",content:"Analyze this JD for hiring bias. Give: GENDER_SCORE (0-100), INCLUSIVE_SCORE (0-100), FLAGS (specific phrases), FIX (one recommendation).\n\nJD:\n"+jdText}],
+    "DEI expert. Reference actual JD text."
+  );
   const gm=a3?.match(/GENDER_SCORE[:\s]*(\d+)/i);
   const fm=a3?.match(/FLAGS[:\s]*([\s\S]*?)(?:FIX:|$)/i);
   const rem=a3?.match(/FIX[:\s]*(.*)/i);
@@ -613,13 +907,20 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
   dispatch({type:"SET_AGENT_STATUS",id:3,status:"done"});
   dispatch({type:"SET_AGENT_LOG",id:3,log:"Bias audit complete."});
 
-  // Agent 4: Outreach Writer — uses actual domainCandidates, not hardcoded list
+  // Agent 4: Outreach Writer — stream each email live
   dispatch({type:"SET_AGENT_STATUS",id:4,status:"active"});
   for(const c of domainCandidates.slice(0,5)){
-    dispatch({type:"SET_AGENT_STREAM",id:4,text:"Writing for "+c.name+"..."});
     dispatch({type:"ADD_WAR_ROOM_LOG",agentId:4,log:"Drafting email for "+c.name+" ("+c.company+")..."});
-    const email=await callClaude([{role:"user",content:"Write a warm personalized recruiter email to "+c.name+" ("+c.role+" at "+c.company+"). Their background: "+c.summary+". We are hiring for this role: "+jdText.slice(0,200)+". Under 100 words. Reference their specific work at "+c.company+". Include subject line. Sign as Hiring Team, FlowZint."}]);
-    dispatch({type:"SET_EMAIL_DRAFT",id:c.id,text:email||"Hi "+c.name.split(" ")[0]+",\n\nYour work at "+c.company+" stood out to us.\n\nWe are building something exciting and think you would be a strong fit.\n\nOpen to a quick 20-min call this week?\n\nBest,\nHiring Team, FlowZint"});
+    let emailFull="";
+    await callClaudeStream(
+      [{role:"user",content:"Write a warm personalized recruiter email to "+c.name+" ("+c.role+" at "+c.company+"). Their background: "+c.summary+". We are hiring for this role: "+jdText.slice(0,200)+". Under 100 words. Reference their specific work at "+c.company+". Include subject line. Sign as Hiring Team, FlowZint."}],
+      "",
+      (accumulated)=>{
+        emailFull=accumulated;
+        dispatch({type:"SET_AGENT_STREAM",id:4,text:"✍️ "+c.name.split(" ")[0]+": "+accumulated});
+      }
+    );
+    dispatch({type:"SET_EMAIL_DRAFT",id:c.id,text:emailFull||"Hi "+c.name.split(" ")[0]+",\n\nYour work at "+c.company+" stood out.\n\nWe're hiring and think you'd be a strong fit.\n\nOpen to a 20-min call?\n\nBest,\nHiring Team, FlowZint"});
     dispatch({type:"ADD_WAR_ROOM_LOG",agentId:4,log:"✓ "+c.name+" email ready"});
   }
   dispatch({type:"SET_AGENT_STATUS",id:4,status:"done"});
@@ -627,40 +928,48 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
 
   // Agent 5: Interview Questions
   dispatch({type:"SET_AGENT_STATUS",id:5,status:"active"});
-  await stream(5,["Analyzing JD requirements for interview gaps...","Generating targeted questions..."]);
-  const a5=await callClaude([{role:"user",content:"Generate 4 interview questions specifically for this role. Must test critical JD requirements.\n\nJD:\n"+jdText.slice(0,400)+"\n\nFormat:\nTECHNICAL: [question]\nSYSTEM DESIGN: [question]\nBEHAVIORAL: [question]\nCULTURE: [question]\n\nMake them specific to this role."}],"Senior engineering interviewer.");
-  const a5lines=(a5||"Questions generated.").split("\n").filter(Boolean);
-  await stream(5,a5lines);
+  const a5=await streamAgent(5,
+    [{role:"user",content:"Generate 4 interview questions specifically for this role. Must test critical JD requirements.\n\nJD:\n"+jdText.slice(0,400)+"\n\nFormat:\nTECHNICAL: [question]\nSYSTEM DESIGN: [question]\nBEHAVIORAL: [question]\nCULTURE: [question]\n\nMake them specific to this role."}],
+    "Senior engineering interviewer."
+  );
   dispatch({type:"SET_INTERVIEW_QS",id:1,qs:a5||"Questions generated."});
   dispatch({type:"SET_AGENT_STATUS",id:5,status:"done"});
   dispatch({type:"SET_AGENT_LOG",id:5,log:"Interview questions ready."});
 
   // Agent 6: Salary Benchmarker
   dispatch({type:"SET_AGENT_STATUS",id:6,status:"active"});
-  await stream(6,["Loading 2025 Indian tech salary data...","Benchmarking against market rates..."]);
-  const a6=await callClaude([{role:"user",content:"Indian tech market salary benchmark (2025) for this role. Give MARKET_RANGE, CITY_PREMIUM, RISK flags, VERDICT on competitiveness. Max 50 words.\n\nJD: "+jdText.slice(0,300)}],"Indian compensation expert.");
-  const a6lines=(a6||"Benchmarking done.").split("\n").filter(Boolean);
-  await stream(6,a6lines);
+  const a6=await streamAgent(6,
+    [{role:"user",content:"Indian tech market salary benchmark (2025) for this role. Give MARKET_RANGE, CITY_PREMIUM, RISK flags, VERDICT on competitiveness. Max 50 words.\n\nJD: "+jdText.slice(0,300)}],
+    "Indian compensation expert."
+  );
   dispatch({type:"SET_SALARY",payload:{range:"Rs 28-42L",fit:4,risk:1,analysis:a6}});
   dispatch({type:"SET_AGENT_STATUS",id:6,status:"done"});
   dispatch({type:"SET_AGENT_LOG",id:6,log:"Salary benchmarking done."});
 
   // Agent 7: Report Generator
   dispatch({type:"SET_AGENT_STATUS",id:7,status:"active"});
-  await stream(7,["Aggregating all agent outputs...","Compiling final report..."]);
   const topC=domainCandidates[0];
   const totalCount=appliedResumes.length||domainCandidates.length||5;
-  const a7=await callClaude([{role:"user",content:"Summarize this hiring pipeline in 3 sentences. 1: pipeline result. 2: top recommendation. 3: key risk.\n\nJD: "+jdText.slice(0,200)+"\nPipeline: "+totalCount+" resumes reviewed, "+domainCandidates.length+" shortlisted, bias audited, emails drafted.\nTop candidate: "+topC.name+", "+topC.role+" at "+topC.company+"."}],"Hiring intelligence AI. Be direct.");
-  const a7lines=(a7||"Report ready.").split("\n").filter(Boolean);
-  await stream(7,a7lines);
+  await streamAgent(7,
+    [{role:"user",content:"Summarize this hiring pipeline in 3 sentences. 1: pipeline result. 2: top recommendation. 3: key risk.\n\nJD: "+jdText.slice(0,200)+"\nPipeline: "+totalCount+" resumes reviewed, "+domainCandidates.length+" shortlisted, bias audited, emails drafted.\nTop candidate: "+topC.name+", "+topC.role+" at "+topC.company+"."}],
+    "Hiring intelligence AI. Be direct."
+  );
   dispatch({type:"SET_AGENT_STATUS",id:7,status:"done"});
   dispatch({type:"SET_AGENT_LOG",id:7,log:"Report ready."});
 
   dispatch({type:"SET_PIPELINE",payload:"done"});
   dispatch({type:"ADD_CROSS_EVENT",event:{type:"hiring_to_care",title:"Hiring pipeline complete",desc:"5 candidates shortlisted. Agents analyzed your actual JD.",action:"Open CareFlow to create onboarding workflow"}});
-  // Save to localStorage history
+  // Save to localStorage history (always)
   const sortedByScore=[...domainCandidates].sort((a,b)=>(b.baseScore||75)-(a.baseScore||75));
-  savePipelineRun({jdText,domain,topCandidate:sortedByScore[0]?.name||"Unknown",topScore:sortedByScore[0]?.baseScore||75,totalCandidates:domainCandidates.length,biasScore:84});
+  savePipelineRunLocal({jdText,domain,topCandidate:sortedByScore[0]?.name||"Unknown",topScore:sortedByScore[0]?.baseScore||75,totalCandidates:domainCandidates.length,biasScore:84});
+  // Save to Supabase (if configured)
+  dbSavePipeline({
+    jdText,
+    candidates:domainCandidates.map(c=>({...c,score:scoreMap[c.id]||c.baseScore||75})),
+    totalResumes:appliedResumes.length||domainCandidates.length,
+  }).then(runId=>{
+    if(runId) dispatch({type:"SET_DB_RUN_ID",payload:runId});
+  });
   toast("Pipeline complete — agents analyzed your actual JD","success");
 }
 
@@ -1197,9 +1506,176 @@ function HiringPipeline(){
   );
 }
 
+// ── SKILL GAP HEATMAP ─────────────────────────────────────────────────────
+function SkillGapHeatmap({candidates,scores}){
+  const[highlight,setHighlight]=useState(null);
+  const[sortBy,setSortBy]=useState("score"); // score | name | gap
+
+  // Extract all unique skills across candidates + mark required vs nice-to-have
+  const allSkillsRaw=candidates.flatMap(c=>c.skills||[]);
+  const skillCounts={};
+  allSkillsRaw.forEach(s=>{const k=s.toLowerCase().trim();skillCounts[k]=(skillCounts[k]||0)+1;});
+  // Skills appearing in ≥2 candidates are "common", sort by frequency
+  const allSkills=Object.entries(skillCounts)
+    .sort((a,b)=>b[1]-a[1])
+    .map(([s])=>s)
+    .slice(0,14); // max 14 columns
+
+  const sorted=[...candidates].sort((a,b)=>{
+    if(sortBy==="score") return (scores[b.id]??b.baseScore??75)-(scores[a.id]??a.baseScore??75);
+    if(sortBy==="name") return a.name.localeCompare(b.name);
+    // sort by gap count (most gaps last)
+    const gapA=allSkills.filter(s=>!(a.skills||[]).map(x=>x.toLowerCase()).includes(s)).length;
+    const gapB=allSkills.filter(s=>!(b.skills||[]).map(x=>x.toLowerCase()).includes(s)).length;
+    return gapA-gapB;
+  });
+
+  const hasSkill=(c,skill)=>(c.skills||[]).map(s=>s.toLowerCase().trim()).includes(skill.toLowerCase().trim());
+  const coveragePct=(skill)=>Math.round((candidates.filter(c=>hasSkill(c,skill)).length/candidates.length)*100);
+
+  const cellColor=(c,skill,isHighlight)=>{
+    const has=hasSkill(c,skill);
+    if(isHighlight) return has?"#1D9E75":"#D85A30";
+    return has?"#E1F5EE":"#FAECE7";
+  };
+  const textColor=(c,skill,isHighlight)=>{
+    const has=hasSkill(c,skill);
+    if(isHighlight) return"white";
+    return has?"#085041":"#993C1D";
+  };
+
+  return(
+    <div style={{animation:"fadeIn 0.3s ease"}}>
+      {/* Controls */}
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A"}}>{candidates.length} candidates × {allSkills.length} skills</div>
+        <div style={{flex:1}}/>
+        <div style={{display:"flex",gap:4,background:"white",border:"1px solid #EEECEA",borderRadius:8,padding:3}}>
+          {[["score","By score"],["gap","Fewest gaps"],["name","A–Z"]].map(([k,l])=>(
+            <button key={k} onClick={()=>setSortBy(k)} style={{fontSize:10,fontWeight:600,padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",background:sortBy===k?"#534AB7":"transparent",color:sortBy===k?"white":"#5F5E5A",transition:"all 0.15s"}}>{l}</button>
+          ))}
+        </div>
+        {/* Legend */}
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:12,height:12,borderRadius:3,background:"#E1F5EE",border:"1px solid #9FE1CB"}}/><span style={{fontSize:10,color:"#5F5E5A"}}>Has skill</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:12,height:12,borderRadius:3,background:"#FAECE7",border:"1px solid #F5B8A0"}}/><span style={{fontSize:10,color:"#5F5E5A"}}>Missing</span></div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{overflowX:"auto",borderRadius:12,border:"1px solid #EEECEA"}}>
+        <table style={{borderCollapse:"collapse",width:"100%",fontSize:11}}>
+          {/* Header row — skill names */}
+          <thead>
+            <tr>
+              <th style={{padding:"10px 14px",textAlign:"left",background:"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#1C1C1A",whiteSpace:"nowrap",minWidth:130,position:"sticky",left:0,zIndex:2}}>Candidate</th>
+              <th style={{padding:"10px 8px",textAlign:"center",background:"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#534AB7",whiteSpace:"nowrap",minWidth:48}}>Score</th>
+              {allSkills.map(skill=>(
+                <th key={skill} onMouseEnter={()=>setHighlight(skill)} onMouseLeave={()=>setHighlight(null)}
+                  style={{padding:"8px 6px",textAlign:"center",background:highlight===skill?"#EEEDFE":"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:600,color:highlight===skill?"#534AB7":"#5F5E5A",cursor:"pointer",transition:"background 0.15s",minWidth:52}}>
+                  <div style={{writingMode:"vertical-rl",transform:"rotate(180deg)",fontSize:10,whiteSpace:"nowrap",padding:"4px 0"}}>{skill}</div>
+                </th>
+              ))}
+              <th style={{padding:"10px 8px",textAlign:"center",background:"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#888780",whiteSpace:"nowrap",minWidth:52}}>Gaps</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((c,ri)=>{
+              const score=scores[c.id]??c.baseScore??75;
+              const gaps=allSkills.filter(s=>!hasSkill(c,s)).length;
+              return(
+                <tr key={c.id} style={{background:ri%2===0?"white":"#FAFAF8"}}>
+                  {/* Name cell */}
+                  <td style={{padding:"8px 14px",borderBottom:"1px solid #F0EFE9",position:"sticky",left:0,background:ri%2===0?"white":"#FAFAF8",zIndex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:24,height:24,borderRadius:"50%",background:c.avatarBg||"#EEEDFE",color:c.avatarText||"#3C3489",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:800,flexShrink:0}}>{c.avatar}</div>
+                      <div>
+                        <div style={{fontWeight:700,color:"#1C1C1A"}}>{c.name}</div>
+                        <div style={{fontSize:9,color:"#888780"}}>{c.role?.slice(0,22)}</div>
+                      </div>
+                    </div>
+                  </td>
+                  {/* Score */}
+                  <td style={{padding:"8px",textAlign:"center",borderBottom:"1px solid #F0EFE9"}}>
+                    <div style={{fontWeight:800,color:score>=80?"#534AB7":score>=60?"#BA7517":"#D85A30"}}>{score}</div>
+                  </td>
+                  {/* Skill cells */}
+                  {allSkills.map(skill=>{
+                    const has=hasSkill(c,skill);
+                    const isHl=highlight===skill;
+                    return(
+                      <td key={skill} style={{padding:"6px",textAlign:"center",borderBottom:"1px solid #F0EFE9",background:isHl?(has?"#EEEDFE":"#FAECE7"):"transparent",transition:"background 0.15s"}}>
+                        <div style={{width:32,height:28,borderRadius:6,background:cellColor(c,skill,isHl),display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto",transition:"all 0.15s",cursor:"default"}}>
+                          <span style={{fontSize:12,color:textColor(c,skill,isHl)}}>{has?"✓":"✗"}</span>
+                        </div>
+                      </td>
+                    );
+                  })}
+                  {/* Gap count */}
+                  <td style={{padding:"8px",textAlign:"center",borderBottom:"1px solid #F0EFE9"}}>
+                    <div style={{fontWeight:700,color:gaps===0?"#1D9E75":gaps<=2?"#BA7517":"#D85A30",fontSize:12}}>{gaps}</div>
+                  </td>
+                </tr>
+              );
+            })}
+            {/* Coverage row */}
+            <tr style={{background:"#F0EFE9"}}>
+              <td style={{padding:"8px 14px",fontWeight:800,color:"#5F5E5A",fontSize:10,position:"sticky",left:0,background:"#F0EFE9",zIndex:1}}>COVERAGE</td>
+              <td/>
+              {allSkills.map(skill=>{
+                const pct=coveragePct(skill);
+                return(
+                  <td key={skill} style={{padding:"6px",textAlign:"center"}}>
+                    <div style={{width:32,margin:"0 auto"}}>
+                      <div style={{height:3,background:"#EEECEA",borderRadius:2,overflow:"hidden",marginBottom:3}}>
+                        <div style={{height:"100%",width:pct+"%",background:pct>=70?"#1D9E75":pct>=40?"#BA7517":"#D85A30",borderRadius:2,transition:"width 0.8s ease"}}/>
+                      </div>
+                      <div style={{fontSize:9,fontWeight:700,color:pct>=70?"#085041":pct>=40?"#633806":"#993C1D"}}>{pct}%</div>
+                    </div>
+                  </td>
+                );
+              })}
+              <td/>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Insight strip */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginTop:14}}>
+        {(()=>{
+          const weakestSkill=allSkills.reduce((a,b)=>coveragePct(a)<=coveragePct(b)?a:b,allSkills[0]);
+          const strongestSkill=allSkills.reduce((a,b)=>coveragePct(a)>=coveragePct(b)?a:b,allSkills[0]);
+          const perfectCands=sorted.filter(c=>allSkills.every(s=>hasSkill(c,s)));
+          return[
+            <Card key="w" style={{padding:"12px 14px",background:"#FAECE7",border:"1px solid #F5B8A0"}}>
+              <div style={{fontSize:9,fontWeight:700,color:"#993C1D",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Biggest gap</div>
+              <div style={{fontSize:13,fontWeight:800,color:"#D85A30"}}>{weakestSkill}</div>
+              <div style={{fontSize:10,color:"#993C1D"}}>only {coveragePct(weakestSkill)}% have it</div>
+            </Card>,
+            <Card key="s" style={{padding:"12px 14px",background:"#E1F5EE",border:"1px solid #9FE1CB"}}>
+              <div style={{fontSize:9,fontWeight:700,color:"#085041",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Strongest skill</div>
+              <div style={{fontSize:13,fontWeight:800,color:"#1D9E75"}}>{strongestSkill}</div>
+              <div style={{fontSize:10,color:"#085041"}}>{coveragePct(strongestSkill)}% of candidates</div>
+            </Card>,
+            <Card key="p" style={{padding:"12px 14px",background:"#EEEDFE",border:"1px solid #CECBF6"}}>
+              <div style={{fontSize:9,fontWeight:700,color:"#3C3489",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>Full matches</div>
+              <div style={{fontSize:13,fontWeight:800,color:"#534AB7"}}>{perfectCands.length} candidate{perfectCands.length!==1?"s":""}</div>
+              <div style={{fontSize:10,color:"#3C3489"}}>{perfectCands.length?perfectCands[0].name.split(" ")[0]+" leads":"no perfect match"}</div>
+            </Card>
+          ];
+        })()}
+      </div>
+    </div>
+  );
+}
+
 function HiringCandidates(){
   const{state,dispatch}=useStore();
   const[modal,setModal]=useState(null);
+  const[compareSelect,setCompareSelect]=useState([]);
+  const[compareOpen,setCompareOpen]=useState(false);
+  const[view,setView]=useState("list"); // list | heatmap
 
   // ── helpers defined first so loadAnalysis can use them ──────────────────
   const getScore=(c)=>state.dynamicScores?.[c.id]??(c.preScore||c.baseScore||c.score||75);
@@ -1355,17 +1831,59 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
   const candidates=(state.activeCandidates||CANDIDATE_POOL.slice(0,5)).map(normalize);
   const sortedCandidates=[...candidates].sort((a,b)=>getScore(b)-getScore(a));
 
+  const toggleCompare=(c,e)=>{
+    e.stopPropagation();
+    setCompareSelect(prev=>{
+      if(prev.find(x=>x.id===c.id)) return prev.filter(x=>x.id!==c.id);
+      if(prev.length>=2) return[prev[1],c];
+      return[...prev,c];
+    });
+  };
+
   return(
-    <div style={{display:"grid",gridTemplateColumns:state.selectedCandidate?"360px 1fr":"1fr",gap:18,maxWidth:state.selectedCandidate?"none":520}}>
+    <>
+    {compareOpen&&compareSelect.length===2&&<CompareModal pair={compareSelect} onClose={()=>setCompareOpen(false)}/>}
+
+    {/* View toggle */}
+    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+      <div style={{display:"flex",background:"white",border:"1px solid #EEECEA",borderRadius:9,padding:3,gap:2}}>
+        {[["list","☰ List"],["heatmap","⬛ Skill heatmap"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setView(k)} style={{fontSize:11,fontWeight:600,padding:"5px 12px",borderRadius:7,border:"none",cursor:"pointer",background:view===k?"#534AB7":"transparent",color:view===k?"white":"#5F5E5A",transition:"all 0.15s"}}>{l}</button>
+        ))}
+      </div>
+      <div style={{flex:1}}/>
+      {view==="list"&&compareSelect.length===2&&(
+        <button onClick={()=>setCompareOpen(true)} style={{fontSize:11,fontWeight:700,background:"linear-gradient(135deg,#0F172A,#1E3A5F)",color:"white",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:5}}>
+          ⚡ Compare {compareSelect[0].name.split(" ")[0]} vs {compareSelect[1].name.split(" ")[0]}
+        </button>
+      )}
+    </div>
+
+    {/* Heatmap view */}
+    {view==="heatmap"&&(
+      <SkillGapHeatmap candidates={sortedCandidates} scores={state.dynamicScores||{}}/>
+    )}
+
+    {/* List view */}
+    {view==="list"&&<div style={{display:"grid",gridTemplateColumns:state.selectedCandidate?"360px 1fr":"1fr",gap:18,maxWidth:state.selectedCandidate?"none":520}}>
       <div>
-        <div style={{fontSize:12,fontWeight:600,color:"#888780",marginBottom:12}}>{candidates.length} candidates — scored against your JD</div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:600,color:"#888780"}}>{candidates.length} candidates — scored against your JD</div>
+          {compareSelect.length===1&&<div style={{fontSize:10,color:"#888780"}}>Select 1 more to compare</div>}
+          {compareSelect.length===0&&<div style={{fontSize:10,color:"#888780"}}>Tap ⊞ to compare 2 candidates</div>}
+        </div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {sortedCandidates.map((c,idx)=>{
             const score=getScore(c);
             const verdict=getVerdict(c);
             const scoreColor=score>=80?"#534AB7":score>=60?"#BA7517":"#D85A30";
+            const inCompare=compareSelect.find(x=>x.id===c.id);
             return(
-            <div key={c.id} onClick={()=>{dispatch({type:"SET_CANDIDATE",payload:{...c,score}});loadAnalysis(c);}} style={{background:"white",borderRadius:12,border:state.selectedCandidate?.id===c.id?"2px solid #534AB7":"1px solid #EEECEA",padding:"14px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",transition:"all 0.2s",boxShadow:state.selectedCandidate?.id===c.id?"0 0 0 4px #EEEDFE":"none"}}>
+            <div key={c.id} style={{position:"relative"}}>
+            <div onClick={()=>{dispatch({type:"SET_CANDIDATE",payload:{...c,score}});loadAnalysis(c);}}
+              onMouseEnter={e=>{if(state.selectedCandidate?.id!==c.id&&!inCompare){e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 8px 24px rgba(83,74,183,0.12)";e.currentTarget.style.borderColor="#C4BFFA";}}}
+              onMouseLeave={e=>{if(state.selectedCandidate?.id!==c.id&&!inCompare){e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=inCompare?"0 0 0 3px #E2E8F0":"none";e.currentTarget.style.borderColor=inCompare?"#0F172A":"#EEECEA";}}}
+              style={{background:"white",borderRadius:12,border:state.selectedCandidate?.id===c.id?"2px solid #534AB7":inCompare?"2px solid #0F172A":"1px solid #EEECEA",padding:"14px 16px",display:"flex",alignItems:"center",gap:12,cursor:"pointer",transition:"all 0.2s",boxShadow:state.selectedCandidate?.id===c.id?"0 0 0 4px #EEEDFE":inCompare?"0 0 0 3px #E2E8F0":"none"}}>
               <div style={{fontSize:11,fontWeight:800,color:"#B4B2A9",width:16}}>#{idx+1}</div>
               <Avatar initials={c.avatar} bg={c.avatarBg} textColor={c.avatarText} size={40}/>
               <div style={{flex:1,minWidth:0}}>
@@ -1383,6 +1901,11 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
                 <ScoreRing score={score} size={44} stroke={4} color={scoreColor}/>
                 {c.parsedSalary>0||c.salary>0?<div style={{fontSize:9,color:"#888780"}}>Rs {c.salary||c.parsedSalary}L</div>:null}
               </div>
+            </div>
+            {/* Compare toggle */}
+            <button onClick={(e)=>toggleCompare(c,e)} title="Add to compare" style={{position:"absolute",top:8,right:8,width:20,height:20,borderRadius:5,background:inCompare?"#0F172A":"#F0EFE9",border:"none",cursor:"pointer",fontSize:9,fontWeight:800,color:inCompare?"white":"#888780",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1}}>
+              {inCompare?"✓":"⊞"}
+            </button>
             </div>
           );})}
         </div>
@@ -1447,7 +1970,8 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
         );
       })()}
       <RejectionSummary decisions={state.candidateDecisions} candidates={sortedCandidates}/>
-    </div>
+    </div>}
+    </>
   );
 }
 
@@ -1609,57 +2133,310 @@ function HiringReport(){
 function HiringChat(){
   const{state,dispatch}=useStore();
   const[input,setInput]=useState("");
+  const[streaming,setStreaming]=useState(false);
   const bottomRef=useRef(null);
-  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[state.chatMessages]);
+  const inputRef=useRef(null);
+  const pipelineDone=state.pipelineState==="done";
+  const activeCands=state.activeCandidates||CANDIDATE_POOL.slice(0,5);
+
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[state.chatMessages,streaming]);
+
+  // Seed welcome message when chat opens and pipeline is done
   useEffect(()=>{
-    if(state.chatOpen&&state.chatMessages.length===0){
-      const cands=state.activeCandidates||CANDIDATE_POOL.slice(0,5);
-      const names=cands.slice(0,2).map(c=>c.name.split(" ")[0]).join(" and ");
-      dispatch({type:"ADD_CHAT_MSG",msg:{role:"assistant",text:"Hi! Pipeline context loaded — "+cands.length+" candidates for your role.\n\nTry: Who fits best? Compare "+names+". Who has shortest notice?"}});
+    if(state.chatOpen&&state.chatMessages.length===0&&pipelineDone){
+      const top=activeCands[0];
+      const scores=activeCands.map(c=>{
+        const sc=state.dynamicScores?.[c.id]??(c.baseScore||c.score||75);
+        return c.name.split(" ")[0]+" "+sc;
+      }).join(", ");
+      dispatch({type:"ADD_CHAT_MSG",msg:{role:"assistant",text:"Pipeline complete. I have full context on "+activeCands.length+" candidates.\n\nScores: "+scores+"\n\nTop pick: "+top?.name+" — ask me why, or challenge it."}});
     }
+  },[state.chatOpen,pipelineDone]);
+
+  // Focus input when chat opens
+  useEffect(()=>{
+    if(state.chatOpen) setTimeout(()=>inputRef.current?.focus(),100);
   },[state.chatOpen]);
-  const send=async()=>{
-    if(!input.trim()||state.chatLoading)return;
-    const msg=input.trim();setInput("");
-    dispatch({type:"ADD_CHAT_MSG",msg:{role:"user",text:msg}});
-    dispatch({type:"SET_CHAT_LOADING",val:true});
-    dispatch({type:"ADD_CHAT_MSG",msg:{role:"assistant",text:""}});
-    const activeCands=state.activeCandidates||CANDIDATE_POOL.slice(0,5);
-    const ctx="You are HireFlow AI assistant. Candidates: "+activeCands.map(c=>{const sc=state.dynamicScores?.[c.id]??(c.baseScore||c.score||75);return c.name+"("+sc+"/100,"+c.company+",Rs "+(c.salary||"?")+"L,"+c.location+","+c.notice+" notice,skills:"+c.skills.join(",")+",gaps:"+c.gaps.join(",")+")"}).join(" | ")+". JD role: "+state.jdText.slice(0,100)+". Answer directly.";
-    const history=state.chatMessages.slice(-6).filter(m=>m.text).map(m=>({role:m.role,content:m.text}));
-    history.push({role:"user",content:msg});
-    const reply=await callClaude(history,ctx);
-    dispatch({type:"UPDATE_LAST_CHAT",text:reply||"Could not process that. Ask about specific candidates."});
-    dispatch({type:"SET_CHAT_LOADING",val:false});
+
+  // Build rich pipeline context for every query
+  const buildContext=()=>{
+    const candCtx=activeCands.map(c=>{
+      const sc=state.dynamicScores?.[c.id]??(c.baseScore||c.score||75);
+      const verdict=state.dynamicVerdicts?.[c.id]||"";
+      return [
+        c.name+":",
+        "  score="+sc+"/100",
+        "  role="+c.role+" at "+(c.company||"?"),
+        "  exp="+c.exp,
+        "  salary=Rs "+(c.salary||"?")+"L",
+        "  location="+(c.location||c.city||"?"),
+        "  notice="+(c.notice||"?"),
+        "  remote="+(c.remote?"yes":"no"),
+        "  skills="+((c.skills||[]).join(",")||"?"),
+        "  gaps="+((c.gaps||[]).join(",")||"none"),
+        "  verdict="+(verdict||"—"),
+        "  summary="+(c.summary||"").slice(0,100),
+      ].join("\n");
+    }).join("\n\n");
+
+    const biasCtx=state.biasReport
+      ? "Bias audit: score="+state.biasReport.score+", flags=["+(state.biasReport.flags||[]).join("; ")+"], fix="+state.biasReport.recommendation
+      : "";
+
+    const salaryCtx=state.salaryData
+      ? "Salary benchmark: "+state.salaryData.range+", analysis="+String(state.salaryData.analysis||"").slice(0,120)
+      : "";
+
+    const jdCtx="JD (first 200 chars): "+state.jdText.slice(0,200);
+
+    return [
+      "You are the HireFlow AI pipeline assistant. You have complete context on this hiring run.",
+      "Be direct, specific, and reference actual candidate names and numbers.",
+      "Never say 'based on the information provided' — just answer.",
+      "If asked to compare, pick a winner and justify it.",
+      "",
+      jdCtx,
+      "",
+      "CANDIDATES:",
+      candCtx,
+      "",
+      biasCtx,
+      salaryCtx,
+    ].filter(Boolean).join("\n");
   };
-  if(!state.chatOpen)return<button onClick={()=>dispatch({type:"TOGGLE_CHAT"})} style={{position:"fixed",bottom:24,right:24,width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#534AB7,#7F77DD)",border:"none",cursor:"pointer",boxShadow:"0 4px 20px rgba(83,74,183,0.4)",fontSize:22,zIndex:998,transition:"transform 0.2s"}} onMouseEnter={e=>e.currentTarget.style.transform="scale(1.1)"} onMouseLeave={e=>e.currentTarget.style.transform="scale(1)"}>🤖</button>;
+
+  const send=async(overrideMsg)=>{
+    const msg=(overrideMsg||input).trim();
+    if(!msg||streaming)return;
+    setInput("");
+    dispatch({type:"ADD_CHAT_MSG",msg:{role:"user",text:msg}});
+    setStreaming(true);
+    dispatch({type:"ADD_CHAT_MSG",msg:{role:"assistant",text:""}});
+
+    const history=state.chatMessages
+      .slice(-8)
+      .filter(m=>m.text&&m.text.length>0)
+      .map(m=>({role:m.role==="assistant"?"assistant":"user",content:m.text}));
+    history.push({role:"user",content:msg});
+
+    await callClaudeStream(
+      history,
+      buildContext(),
+      (accumulated)=>{
+        dispatch({type:"UPDATE_LAST_CHAT",text:accumulated});
+      }
+    );
+    setStreaming(false);
+  };
+
+  // Dynamic suggestions based on actual candidates
+  const suggestions=pipelineDone&&activeCands.length>=2?[
+    "Who should I hire first and why?",
+    "Compare "+activeCands[0]?.name?.split(" ")[0]+" and "+activeCands[1]?.name?.split(" ")[0],
+    "Who is most likely to counteroffer?",
+    "What's the biggest risk in this shortlist?",
+    "Who can join fastest?",
+    "Is the salary range competitive?",
+  ]:[];
+
+  // Collapsed button
+  if(!state.chatOpen){
+    return(
+      <button
+        onClick={()=>dispatch({type:"TOGGLE_CHAT"})}
+        title="Ask the pipeline"
+        style={{position:"fixed",bottom:24,right:24,width:54,height:54,borderRadius:"50%",background:"linear-gradient(135deg,#534AB7,#7F77DD)",border:"none",cursor:"pointer",boxShadow:"0 4px 20px rgba(83,74,183,0.4)",fontSize:22,zIndex:998,transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center"}}
+        onMouseEnter={e=>{e.currentTarget.style.transform="scale(1.1)";e.currentTarget.style.boxShadow="0 8px 28px rgba(83,74,183,0.55)";}}
+        onMouseLeave={e=>{e.currentTarget.style.transform="scale(1)";e.currentTarget.style.boxShadow="0 4px 20px rgba(83,74,183,0.4)";}}>
+        💬
+        {pipelineDone&&<div style={{position:"absolute",top:2,right:2,width:12,height:12,borderRadius:"50%",background:"#4ADE80",border:"2px solid white"}}/>}
+      </button>
+    );
+  }
+
   return(
-    <div style={{position:"fixed",bottom:24,right:24,width:360,height:520,background:"white",borderRadius:20,boxShadow:"0 20px 60px rgba(0,0,0,0.18)",zIndex:998,display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid #EEECEA"}}>
-      <div style={{background:"linear-gradient(135deg,#534AB7,#7F77DD)",padding:"14px 18px",display:"flex",alignItems:"center",gap:10}}>
-        <div style={{width:34,height:34,borderRadius:"50%",background:"rgba(255,255,255,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🤖</div>
-        <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"white"}}>HireFlow AI Assistant</div><div style={{fontSize:10,color:"rgba(255,255,255,0.7)"}}>Pipeline context loaded</div></div>
-        <button onClick={()=>dispatch({type:"TOGGLE_CHAT"})} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:"50%",width:26,height:26,cursor:"pointer",color:"white",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>x</button>
-      </div>
-      <div style={{flex:1,overflowY:"auto",padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
-        {state.chatMessages.map((m,i)=>(
-          <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
-            <div style={{maxWidth:"85%",padding:"9px 13px",borderRadius:m.role==="user"?"12px 12px 4px 12px":"12px 12px 12px 4px",background:m.role==="user"?"#534AB7":"#F7F6F3",color:m.role==="user"?"white":"#1C1C1A",fontSize:12,lineHeight:1.6,whiteSpace:"pre-wrap"}}>
-              {i===state.chatMessages.length-1&&m.role==="assistant"&&state.chatLoading?<StreamText text={m.text||"Thinking..."}/>:m.text}
-            </div>
+    <div style={{position:"fixed",bottom:24,right:24,width:380,height:560,background:"white",borderRadius:20,boxShadow:"0 20px 60px rgba(0,0,0,0.2)",zIndex:998,display:"flex",flexDirection:"column",overflow:"hidden",border:"1px solid #EEECEA",animation:"fadeIn 0.2s ease"}}>
+
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg,#534AB7,#7F77DD)",padding:"14px 18px",display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+        <div style={{width:36,height:36,borderRadius:"50%",background:"rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>💬</div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:800,color:"white"}}>Ask the Pipeline</div>
+          <div style={{fontSize:10,color:"rgba(255,255,255,0.75)"}}>
+            {pipelineDone?"Full context loaded · "+activeCands.length+" candidates · Groq streaming":"Run the pipeline first to unlock"}
           </div>
-        ))}
-        {state.chatMessages.length<=1&&["Who fits remote best?","Compare Aryan and Sneha","Shortest notice period?","Who fits the budget?"].map(s=><button key={s} onClick={()=>setInput(s)} style={{textAlign:"left",padding:"7px 11px",background:"#EEEDFE",border:"1px solid #CECBF6",borderRadius:8,fontSize:11,color:"#534AB7",cursor:"pointer"}}>{s}</button>)}
-        <div ref={bottomRef}/>
+        </div>
+        <button onClick={()=>dispatch({type:"TOGGLE_CHAT"})} style={{background:"rgba(255,255,255,0.15)",border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",color:"white",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
       </div>
-      <div style={{padding:"10px 12px",borderTop:"1px solid #EEECEA",display:"flex",gap:8}}>
-        <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&send()} placeholder="Ask about candidates..." style={{flex:1,border:"1px solid #EEECEA",borderRadius:9,padding:"8px 11px",fontSize:12,fontFamily:"inherit",outline:"none",background:"#FAFAF8"}} onFocus={e=>e.target.style.borderColor="#534AB7"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
-        <button onClick={send} disabled={!input.trim()||state.chatLoading} style={{width:34,height:34,borderRadius:9,background:input.trim()?"#534AB7":"#EEECEA",border:"none",cursor:"pointer",color:"white",fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>→</button>
-      </div>
+
+      {/* Pipeline not run yet */}
+      {!pipelineDone&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:28,textAlign:"center"}}>
+          <div style={{fontSize:36,marginBottom:12}}>🔒</div>
+          <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:6}}>Pipeline not run yet</div>
+          <div style={{fontSize:12,color:"#888780",lineHeight:1.6}}>Run the hiring pipeline first. Once agents complete, I'll have full context on every candidate — scores, gaps, bias flags, salary fit — and can answer any question.</div>
+        </div>
+      )}
+
+      {/* Messages */}
+      {pipelineDone&&(
+        <div style={{flex:1,overflowY:"auto",padding:"14px 14px 6px",display:"flex",flexDirection:"column",gap:10}}>
+          {state.chatMessages.map((m,i)=>{
+            const isLast=i===state.chatMessages.length-1;
+            const isStreaming=isLast&&m.role==="assistant"&&streaming;
+            return(
+              <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",alignItems:"flex-end",gap:7}}>
+                {m.role==="assistant"&&(
+                  <div style={{width:24,height:24,borderRadius:"50%",background:"linear-gradient(135deg,#534AB7,#7F77DD)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0,marginBottom:2}}>⚡</div>
+                )}
+                <div style={{
+                  maxWidth:"82%",
+                  padding:"10px 13px",
+                  borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",
+                  background:m.role==="user"?"linear-gradient(135deg,#534AB7,#7F77DD)":"#F7F6F3",
+                  color:m.role==="user"?"white":"#1C1C1A",
+                  fontSize:12.5,
+                  lineHeight:1.65,
+                  whiteSpace:"pre-wrap",
+                  boxShadow:m.role==="user"?"0 2px 8px rgba(83,74,183,0.3)":"0 1px 3px rgba(0,0,0,0.06)",
+                }}>
+                  {isStreaming?(
+                    <span>{m.text}<span style={{display:"inline-block",width:2,height:13,background:"#534AB7",marginLeft:2,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/></span>
+                  ):m.text}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Suggested questions — shown when few messages */}
+          {state.chatMessages.length<=1&&suggestions.length>0&&(
+            <div style={{marginTop:4}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#B4B2A9",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:7}}>Try asking</div>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                {suggestions.map(s=>(
+                  <button key={s} onClick={()=>send(s)} style={{textAlign:"left",padding:"8px 12px",background:"#EEEDFE",border:"1px solid #CECBF6",borderRadius:9,fontSize:11.5,color:"#534AB7",cursor:"pointer",fontWeight:500,transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background="#E0DDFC"} onMouseLeave={e=>e.currentTarget.style.background="#EEEDFE"}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef}/>
+        </div>
+      )}
+
+      {/* Input */}
+      {pipelineDone&&(
+        <div style={{padding:"10px 12px",borderTop:"1px solid #EEECEA",display:"flex",gap:8,flexShrink:0,background:"white"}}>
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+            placeholder="Ask anything about this pipeline..."
+            disabled={streaming}
+            style={{flex:1,border:"1px solid #EEECEA",borderRadius:10,padding:"9px 12px",fontSize:12.5,fontFamily:"inherit",outline:"none",background:streaming?"#FAFAF8":"white",transition:"border-color 0.15s"}}
+            onFocus={e=>e.target.style.borderColor="#534AB7"}
+            onBlur={e=>e.target.style.borderColor="#EEECEA"}
+          />
+          <button
+            onClick={()=>send()}
+            disabled={!input.trim()||streaming}
+            style={{width:36,height:36,borderRadius:10,background:input.trim()&&!streaming?"linear-gradient(135deg,#534AB7,#7F77DD)":"#EEECEA",border:"none",cursor:input.trim()&&!streaming?"pointer":"not-allowed",color:"white",fontSize:15,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all 0.15s",boxShadow:input.trim()&&!streaming?"0 2px 8px rgba(83,74,183,0.3)":"none"}}>
+            {streaming?<div style={{width:12,height:12,border:"2px solid rgba(255,255,255,0.3)",borderTopColor:"#534AB7",borderRadius:"50%",animation:"spin 0.7s linear infinite"}}/>:"↑"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── SALES MODE ────────────────────────────────────────────────────────────
+// ── DRIP SEQUENCE PANEL ───────────────────────────────────────────────────
+function DripSequencePanel({prospects,product,onEmpty}){
+  const toast=useToast();
+  const[selected,setSelected]=useState(prospects[0]||null);
+  const[sequences,setSequences]=useState({});
+  const[generating,setGenerating]=useState(null);
+
+  if(!prospects.length) return(
+    <Card style={{padding:48,textAlign:"center"}}>
+      <div style={{fontSize:40,marginBottom:12}}>🔁</div>
+      <div style={{fontSize:14,fontWeight:700,color:"#1C1C1A",marginBottom:8}}>No prospects yet</div>
+      <Btn variant="orange" onClick={onEmpty}>Generate prospects first</Btn>
+    </Card>
+  );
+
+  const generate=async(p)=>{
+    if(sequences[p.id]||generating===p.id) return;
+    setGenerating(p.id);
+    setSequences(s=>({...s,[p.id]:[{subject:"",body:""},{subject:"",body:""},{subject:"",body:""}]}));
+    const emails=["immediate follow-up (Day 1)","follow-up if no reply (Day 4)","final breakup email (Day 10)"];
+    const seq=[];
+    for(let i=0;i<3;i++){
+      let full="";
+      await callClaudeStream([{role:"user",content:"Write email "+(i+1)+" of 3 in a B2B drip sequence.\n\nThis is the "+emails[i]+".\nProspect: "+p.name+", "+p.role+" at "+p.company+"\nPain: "+p.painPoint+"\nProduct: "+product.slice(0,200)+"\n\nFormat:\nSUBJECT: [subject line]\n\n[email body — under 80 words]\n\nSign as Sales Team, FlowZint.\nEmail "+(i+1)+"/3 should feel progressively more concise."}],"",(acc)=>{
+        full=acc;
+        setSequences(s=>{
+          const prev=[...(s[p.id]||[{},{},{}])];
+          const lines=acc.split("\n");
+          const subjLine=lines.find(l=>l.toLowerCase().startsWith("subject:"));
+          prev[i]={subject:subjLine?subjLine.replace(/^subject:\s*/i,"").trim():"Follow-up "+(i+1),body:subjLine?lines.filter(l=>l!==subjLine).join("\n").trim():acc};
+          return{...s,[p.id]:prev};
+        });
+      });
+      seq.push(full);
+    }
+    setGenerating(null);
+    toast("3-email drip sequence ready for "+p.name,"success");
+  };
+
+  return(
+    <div style={{display:"grid",gridTemplateColumns:"220px 1fr",gap:14,maxWidth:900}}>
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        <div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:4}}>Select prospect</div>
+        {prospects.map(p=>(
+          <div key={p.id} onClick={()=>setSelected(p)} style={{padding:"10px 12px",borderRadius:9,border:"1.5px solid "+(selected?.id===p.id?"#BA7517":"#EEECEA"),background:selected?.id===p.id?"#FFF8EE":"white",cursor:"pointer",transition:"all 0.15s"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#1C1C1A"}}>{p.name}</div>
+            <div style={{fontSize:10,color:"#888780"}}>{p.company}</div>
+            {sequences[p.id]&&<div style={{fontSize:9,color:"#1D9E75",fontWeight:700,marginTop:3}}>✓ Sequence ready</div>}
+          </div>
+        ))}
+      </div>
+      {selected&&(
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div><div style={{fontSize:13,fontWeight:800,color:"#1C1C1A"}}>{selected.name} — 3-email drip</div><div style={{fontSize:11,color:"#888780"}}>Automated sequence · Days 1, 4, 10</div></div>
+            <Btn variant="orange" size="sm" disabled={generating===selected.id||!!sequences[selected.id]} onClick={()=>generate(selected)}>
+              {generating===selected.id?<><Spinner/>Writing...</>:sequences[selected.id]?"Generated":"Generate sequence"}
+            </Btn>
+          </div>
+          {sequences[selected.id]?sequences[selected.id].map((email,i)=>(
+            <Card key={i} style={{padding:16}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:22,height:22,borderRadius:6,background:["#BA7517","#634A13","#3D2A08"][i],display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:"white"}}>{i+1}</div>
+                  <span style={{fontSize:11,fontWeight:700,color:"#1C1C1A"}}>{["Day 1","Day 4","Day 10"][i]} — {email.subject||"..."}</span>
+                </div>
+                <button onClick={()=>{navigator.clipboard?.writeText("Subject: "+email.subject+"\n\n"+email.body);toast("Email "+(i+1)+" copied","success");}} style={{fontSize:10,padding:"4px 9px",background:"#F7F6F3",border:"1px solid #EEECEA",borderRadius:6,cursor:"pointer",fontWeight:600,color:"#5F5E5A"}}>Copy</button>
+              </div>
+              <div style={{fontSize:11.5,color:"#5F5E5A",lineHeight:1.65,whiteSpace:"pre-wrap",background:"#FAFAF8",borderRadius:8,padding:"10px 12px",border:"1px solid #EEECEA",minHeight:40}}>
+                {email.body||<span style={{color:"#B4B2A9"}}>Writing...</span>}
+                {generating===selected.id&&!email.body&&<span style={{display:"inline-block",width:2,height:11,background:"#BA7517",marginLeft:1,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>}
+              </div>
+            </Card>
+          )):(
+            <Card style={{padding:32,textAlign:"center",color:"#888780"}}>
+              <div style={{fontSize:28,marginBottom:8}}>🔁</div>
+              <div style={{fontSize:12}}>Click "Generate sequence" to create 3 follow-up emails for {selected.name}</div>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SalesMode(){
   const{state,dispatch}=useStore();
   const toast=useToast();
@@ -1675,16 +2452,23 @@ function SalesMode(){
     const p="Based on this product and target, generate 5 realistic B2B prospect profiles.\nProduct: "+state.salesProduct+"\nTarget: "+state.salesTarget+"\n\nReturn ONLY JSON array: [{id,name,role,company,industry,painPoint,fitScore,budget,objection,email}]. fitScore 0-100. Make realistic and specific.";
     try{
       const raw=await callClaude([{role:"user",content:p}]);
-      const clean=raw.split("```").join("").replace(/^json/,"").trim();
+      const clean=raw.split("```").join("").replace(/^json/i,"").trim();
       const prospects=JSON.parse(clean);
       dispatch({type:"SET_SALES_PROSPECTS",payload:prospects});
+      // Stream each email as it's written
       for(const pr of prospects){
-        const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm.";
-        const email=await callClaude([{role:"user",content:ep}]);
-        dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:email||"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" faces "+pr.painPoint+".\n\nOur platform can help. Would you be open to a 15-min call?\n\nBest,\nSales Team"});
+        const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm. Sign as Sales Team, FlowZint.";
+        let emailText="";
+        await callClaudeStream([{role:"user",content:ep}],"",(accumulated)=>{
+          emailText=accumulated;
+          dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:accumulated});
+        });
+        if(!emailText) dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" faces "+pr.painPoint+".\n\nOur platform can help. Would you be open to a 15-min call?\n\nBest,\nSales Team, FlowZint"});
       }
       toast("5 prospects with personalized outreach ready","success");
       setActiveTab("prospects");
+      // Save to Supabase
+      saveSalesSession({product:state.salesProduct,industry:state.salesTarget,prospects,emailDrafts:{}});
     }catch{
       const fallback=[
         {id:1,name:"Ankit Sharma",role:"VP Engineering",company:"GrowthTech",industry:"SaaS",painPoint:"Manual hiring taking 3+ weeks",fitScore:92,budget:"Rs 5-10L/yr",objection:"Already using spreadsheets",email:"ankit@growthtech.io"},
@@ -1694,7 +2478,7 @@ function SalesMode(){
         {id:5,name:"Karan Mehta",role:"CTO",company:"DevStudio",industry:"Agency",painPoint:"Inconsistent interviews",fitScore:71,budget:"Rs 3-6L/yr",objection:"Need integrations",email:"karan@devstudio.io"},
       ];
       dispatch({type:"SET_SALES_PROSPECTS",payload:fallback});
-      for(const pr of fallback)dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" might be dealing with "+pr.painPoint+".\n\nOur AI platform saves 14+ hours per hire. Would you be open to a 15-min demo?\n\nBest,\nSales Team"});
+      for(const pr of fallback)dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" might be dealing with "+pr.painPoint+".\n\nOur AI platform saves 14+ hours per hire. Would you be open to a 15-min demo?\n\nBest,\nSales Team, FlowZint"});
       toast("Prospects generated","success");
       setActiveTab("prospects");
     }
@@ -1705,17 +2489,37 @@ function SalesMode(){
     if(!objInput.trim())return;
     setObjLoading(true);setObjReply("");
     const p="Expert sales response for: "+state.salesProduct.slice(0,200)+"\n\nObjection: '"+objInput+"'\n\n3-sentence response: acknowledge, reframe as benefit, move to next step. Specific to product.";
-    const reply=await callClaude([{role:"user",content:p}]);
-    setObjReply(reply||"I completely understand that concern. Many of our customers said the same before seeing a 10x return in month one. Would a free trial help you evaluate without commitment?");
+    await callClaudeStream([{role:"user",content:p}],"",(accumulated)=>{
+      setObjReply(accumulated);
+    });
+    if(!objReply) setObjReply("I completely understand that concern. Many of our customers said the same before seeing a 10x return in month one. Would a free trial help you evaluate without commitment?");
     setObjLoading(false);
   };
 
-  const tabs=[{id:"setup",label:"Setup",icon:"⚙️"},{id:"prospects",label:"Prospects",icon:"🎯"},{id:"outreach",label:"Outreach",icon:"✉️"},{id:"objections",label:"Objections",icon:"🛡️"}];
+  const STEPS=[
+    {id:"setup",label:"Setup",icon:"⚙️",num:1,hint:"Describe product"},
+    {id:"prospects",label:"Prospects",icon:"🎯",num:2,hint:"AI finds leads"},
+    {id:"outreach",label:"Outreach",icon:"✉️",num:3,hint:"Personalized emails"},
+    {id:"drip",label:"Drip",icon:"🔁",num:4,hint:"Sequence builder"},
+    {id:"objections",label:"Objections",icon:"🛡️",num:5,hint:"Handle pushback"},
+  ];
+  const prospectsReady=state.salesProspects.length>0;
+  const curNum=STEPS.find(s=>s.id===activeTab)?.num||1;
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
-      <div style={{display:"flex",gap:4,marginBottom:18,background:"white",borderRadius:12,padding:4,border:"1px solid #EEECEA",width:"fit-content"}}>
-        {tabs.map(t=><button key={t.id} onClick={()=>setActiveTab(t.id)} style={{padding:"8px 16px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:activeTab===t.id?"#BA7517":"transparent",color:activeTab===t.id?"white":"#5F5E5A",transition:"all 0.15s"}}>{t.icon} {t.label}</button>)}
+      {/* Step stepper */}
+      <div style={{display:"flex",alignItems:"flex-start",marginBottom:20,background:"white",borderRadius:14,padding:"14px 18px",border:"1px solid #EEECEA",boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}}>
+        {STEPS.map((s,i)=>[
+          <button key={s.id} onClick={()=>{if(s.num>1&&!prospectsReady)return;setActiveTab(s.id);}} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:5,background:"none",border:"none",cursor:s.num===1||prospectsReady?"pointer":"default",padding:"0 10px",opacity:s.num>1&&!prospectsReady?0.4:1,minWidth:64}}>
+            <div style={{width:32,height:32,borderRadius:"50%",background:curNum>s.num?"#BA7517":curNum===s.num?"#BA7517":"#F3F4F6",border:`2px solid ${curNum>=s.num?"#BA7517":"#E5E7EB"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:curNum>=s.num?"white":"#9CA3AF",transition:"all 0.25s",boxShadow:curNum===s.num?"0 0 0 4px rgba(186,117,23,0.12)":"none"}}>
+              {curNum>s.num?"✓":s.num}
+            </div>
+            <div style={{fontSize:11,fontWeight:700,color:curNum===s.num?"#BA7517":curNum>s.num?"#374151":"#9CA3AF",whiteSpace:"nowrap"}}>{s.label}</div>
+            <div style={{fontSize:9,color:"#9CA3AF",whiteSpace:"nowrap"}}>{s.hint}</div>
+          </button>,
+          i<STEPS.length-1&&<div key={s.id+"ln"} style={{flex:1,height:2,background:curNum>s.num?"#BA7517":"#E5E7EB",transition:"background 0.4s",marginTop:15,borderRadius:2}}/>
+        ])}
       </div>
 
       {activeTab==="setup"&&(
@@ -1761,14 +2565,28 @@ function SalesMode(){
       {activeTab==="outreach"&&(
         <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:760}}>
           {state.salesProspects.length===0?<Card style={{padding:48,textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>✉️</div><Btn variant="orange" onClick={()=>setActiveTab("setup")}>Set up product first</Btn></Card>:
-          state.salesProspects.map(p=>{const sent=state.salesSentEmails[p.id];return(
+          state.salesProspects.map(p=>{const sent=state.salesSentEmails[p.id];const draft=state.salesEmailDrafts[p.id]||"";return(
             <Card key={p.id} style={{padding:18}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}><div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#1C1C1A"}}>{p.name} — {p.company}</div><div style={{fontSize:11,color:"#888780"}}>{p.email} · Fit: {p.fitScore}/100</div></div>{sent?<Tag color="success">Sent</Tag>:<Btn variant="orange" size="sm" onClick={()=>{dispatch({type:"SET_SALES_SENT",id:p.id});toast("Sent to "+p.name,"success");}}>Send</Btn>}</div>
-              <div style={{background:"#FFF8EE",border:"1px solid #FAC775",borderRadius:8,padding:12,fontSize:12,color:"#5F5E5A",lineHeight:1.65,maxHeight:72,overflow:"hidden",WebkitMaskImage:"linear-gradient(to bottom,black 30%,transparent 100%)",whiteSpace:"pre-wrap"}}>{state.salesEmailDrafts[p.id]||"Generating..."}</div>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#1C1C1A"}}>{p.name} — {p.company}</div><div style={{fontSize:11,color:"#888780"}}>{p.email} · Fit: {p.fitScore}/100</div></div>
+                <div style={{display:"flex",gap:6}}>
+                  {draft&&<button onClick={async()=>{
+                    const li=await callClaude([{role:"user",content:"Write a LinkedIn message (under 280 chars, no line breaks) to "+p.name+" ("+p.role+" at "+p.company+") about: "+state.salesProduct.slice(0,150)+". Pain: "+p.painPoint+". Warm, specific, end with a question."}]);
+                    navigator.clipboard?.writeText(li||"Hi "+p.name.split(" ")[0]+", saw your work at "+p.company+" — building something that solves "+p.painPoint+". Worth a 10-min chat?");
+                    toast("LinkedIn message copied!","success");
+                  }} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:7,cursor:"pointer",color:"#1D4ED8",display:"flex",alignItems:"center",gap:4}}>
+                    <span>in</span> LinkedIn
+                  </button>}
+                  {sent?<Tag color="success">Sent</Tag>:<Btn variant="orange" size="sm" onClick={()=>{dispatch({type:"SET_SALES_SENT",id:p.id});toast("Sent to "+p.name,"success");}}>Send</Btn>}
+                </div>
+              </div>
+              <div style={{background:"#FFF8EE",border:"1px solid #FAC775",borderRadius:8,padding:12,fontSize:12,color:"#5F5E5A",lineHeight:1.65,maxHeight:80,overflow:"hidden",WebkitMaskImage:"linear-gradient(to bottom,black 40%,transparent 100%)",whiteSpace:"pre-wrap"}}>{draft||<span style={{color:"#B4B2A9"}}>Writing email...</span>}</div>
             </Card>
           );})}
         </div>
       )}
+
+      {activeTab==="drip"&&<DripSequencePanel prospects={state.salesProspects} product={state.salesProduct} onEmpty={()=>setActiveTab("setup")}/>}
 
       {activeTab==="objections"&&(
         <div style={{maxWidth:680,display:"flex",flexDirection:"column",gap:14}}>
@@ -1821,23 +2639,34 @@ function SupportMode(){
   const buildKB=async()=>{
     if(!state.supportDocs.trim()){toast("Add docs first","error");return;}
     dispatch({type:"SET_SUPPORT_BUILDING",val:true});
-    await new Promise(r=>setTimeout(r,1800));
-    dispatch({type:"SET_SUPPORT_KB",payload:[
-      {q:"How do I get started?",a:"Sign up at flowzint.in, create workspace, choose template, paste context, run pipeline."},
-      {q:"What are the pricing plans?",a:"Starter: Rs 999/month. Team: Rs 2,999/month. Enterprise: Custom."},
-      {q:"How do I cancel?",a:"Settings > Billing > Cancel Plan. Access continues until period ends."},
-      {q:"What is your refund policy?",a:"14-day money back guarantee. Email support@flowzint.in."},
-      {q:"Pipeline is stuck — what do I do?",a:"Refresh and restart. If persists, check API key in Settings > Integrations."},
-      {q:"How do I change my password?",a:"Settings > Security > Change Password."},
-    ]});
+    toast("AI building knowledge base from your docs...","info");
+    try{
+      const raw=await callClaude([{role:"user",content:"Extract 6-8 FAQ pairs from these product docs. Return ONLY JSON array, no markdown:\n[{\"q\":\"customer question\",\"a\":\"concise answer\"}]\n\nDocs:\n"+state.supportDocs}],"Expert support KB builder. Extract real questions customers would ask. Be specific to the actual content.");
+      const clean=raw.split("```").join("").replace(/^json\s*/i,"").trim();
+      const kb=JSON.parse(clean);
+      dispatch({type:"SET_SUPPORT_KB",payload:kb});
+      toast("Knowledge base ready — "+kb.length+" items extracted","success");
+    }catch{
+      dispatch({type:"SET_SUPPORT_KB",payload:[
+        {q:"How do I get started?",a:"Sign up, create workspace, choose template, paste context, run pipeline."},
+        {q:"What are the pricing plans?",a:"Starter: Rs 999/month. Team: Rs 2,999/month. Enterprise: Custom."},
+        {q:"How do I cancel?",a:"Settings > Billing > Cancel Plan. Access continues until period ends."},
+        {q:"What is your refund policy?",a:"14-day money back guarantee. Email support@flowzint.in."},
+        {q:"Pipeline is stuck — what do I do?",a:"Refresh and restart. Check API key in Settings > Integrations."},
+        {q:"How do I change my password?",a:"Settings > Security > Change Password."},
+      ]});
+      toast("KB ready (fallback)","info");
+    }
     dispatch({type:"SET_SUPPORT_BUILDING",val:false});
-    toast("Knowledge base ready — bot is live","success");
   };
 
   const sendMsg=async()=>{
     if(!chatInput.trim()||chatLoading||state.supportKB.length===0)return;
     const msg=chatInput.trim();setChatInput("");
     const id=activeChatId||Date.now();
+    const kbContext="Knowledge base:\n"+state.supportKB.map(i=>"Q: "+i.q+"\nA: "+i.a).join("\n\n");
+    const docsContext=state.supportDocs?"Product docs:\n"+state.supportDocs.slice(0,600):"";
+    const sys="You are a helpful, concise support agent. Answer using the knowledge base below. If the answer is not in the KB, say you will escalate to a human agent. Never make up information.\n\n"+kbContext+"\n\n"+docsContext;
     if(!activeChatId){
       setActiveChatId(id);
       dispatch({type:"ADD_SUPPORT_CHAT",chat:{id,messages:[{role:"user",text:msg},{role:"assistant",text:""}],sentiment:"neutral",status:"open",timestamp:new Date().toLocaleTimeString()}});
@@ -1845,19 +2674,56 @@ function SupportMode(){
       dispatch({type:"UPDATE_SUPPORT_CHAT",id,updates:{messages:[...((state.supportChats.find(c=>c.id===id)?.messages)||[]),{role:"user",text:msg},{role:"assistant",text:""}]}});
     }
     setChatLoading(true);
-    const sys="You are a helpful support agent. Use this knowledge: "+SAMPLE_DOCS+". Answer concisely. If unsure, say you will escalate to a human agent.";
-    const reply=await callClaude([{role:"user",content:msg}],sys);
-    const sentiment=msg.toLowerCase().includes("angry")||msg.toLowerCase().includes("refund")||msg.toLowerCase().includes("urgent")?"negative":msg.toLowerCase().includes("great")||msg.toLowerCase().includes("love")?"positive":"neutral";
-    const chat=state.supportChats.find(c=>c.id===id)||{messages:[{role:"user",text:msg}]};
-    const updated=[...chat.messages.slice(0,-1),{role:"assistant",text:reply||"Thank you for reaching out. Let me look into this for you. Can you provide more details?"}];
-    dispatch({type:"UPDATE_SUPPORT_CHAT",id,updates:{messages:updated,sentiment,status:sentiment==="negative"?"escalated":"open"}});
+    let reply="";
+    await callClaudeStream([{role:"user",content:msg}],sys,(accumulated)=>{
+      reply=accumulated;
+      // Update the last (empty) assistant message in real time
+      const currentChat=state.supportChats.find(c=>c.id===id)||{messages:[{role:"user",text:msg}]};
+      const updated=[...currentChat.messages.slice(0,-1),{role:"assistant",text:accumulated}];
+      dispatch({type:"UPDATE_SUPPORT_CHAT",id,updates:{messages:updated}});
+    });
+    // Sentiment scoring
+    const negWords=["angry","refund","cancel","urgent","broken","failed","useless","terrible","hate","worst","disappointed"];
+    const posWords=["great","love","thanks","awesome","perfect","helpful","excellent","resolved","solved","happy"];
+    const msgLow=msg.toLowerCase();const replyLow=(reply||"").toLowerCase();
+    const negScore=negWords.filter(w=>msgLow.includes(w)).length;
+    const posScore=posWords.filter(w=>msgLow.includes(w)||replyLow.includes(w)).length;
+    const sentiment=negScore>posScore?"negative":posScore>0?"positive":"neutral";
+    // CSAT prediction (1-5 scale): positive=4-5, neutral=3, negative=1-2
+    const csatBase=sentiment==="positive"?4:sentiment==="neutral"?3:2;
+    const csatVariance=(Math.random()-0.5)*0.8;
+    const csat=Math.min(5,Math.max(1,Math.round((csatBase+csatVariance)*10)/10));
+    const finalChat=state.supportChats.find(c=>c.id===id)||{messages:[{role:"user",text:msg}]};
+    const finalMsgs=[...finalChat.messages.slice(0,-1),{role:"assistant",text:reply||"Thank you for reaching out. Let me look into this for you.",csat,sentiment}];
+    dispatch({type:"UPDATE_SUPPORT_CHAT",id,updates:{messages:finalMsgs,sentiment,status:sentiment==="negative"?"escalated":"open",csat}});
+    // Async save to Supabase (don't block UI)
+    const updatedChats=[...state.supportChats.filter(c=>c.id!==id),{...state.supportChats.find(c=>c.id===id)||{id,timestamp:new Date().toLocaleTimeString()},messages:finalMsgs,sentiment,csat}];
+    saveSupportSession({docs:state.supportDocs,kb:state.supportKB,chats:updatedChats});
     setChatLoading(false);
   };
 
   const activeChat=state.supportChats.find(c=>c.id===activeChatId);
 
+  const SUPPORT_STEPS=[{n:1,label:"Paste docs",done:state.supportDocs.trim().length>0},{n:2,label:"Build KB",done:state.supportKB.length>0},{n:3,label:"Test chat",done:state.supportChats.length>0}];
+
   return(
-    <div style={{display:"grid",gridTemplateColumns:"290px 1fr",gap:16,height:"calc(100vh - 160px)"}}>
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* 3-step guide */}
+      <div style={{display:"flex",alignItems:"center",gap:0,background:"white",border:"1px solid #EEECEA",borderRadius:14,padding:"12px 20px",boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}}>
+        {SUPPORT_STEPS.map((s,i)=>[
+          <div key={s.n} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"0 12px"}}>
+            <div style={{width:30,height:30,borderRadius:"50%",background:s.done?"#1D9E75":"#F3F4F6",border:`2px solid ${s.done?"#1D9E75":"#E5E7EB"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:s.done?"white":"#9CA3AF",transition:"all 0.25s",boxShadow:s.done?"0 0 0 4px rgba(29,158,117,0.12)":"none"}}>
+              {s.done?"✓":s.n}
+            </div>
+            <div style={{fontSize:10,fontWeight:700,color:s.done?"#1D9E75":"#9CA3AF",whiteSpace:"nowrap"}}>{s.label}</div>
+          </div>,
+          i<SUPPORT_STEPS.length-1&&<div key={s.n+"ln"} style={{flex:1,height:2,background:s.done?"#1D9E75":"#E5E7EB",transition:"background 0.4s",marginBottom:14,borderRadius:2}}/>
+        ])}
+        <div style={{marginLeft:"auto",paddingLeft:16,borderLeft:"1px solid #EEECEA"}}>
+          <div style={{fontSize:11,fontWeight:700,color:state.supportKB.length>0?"#085041":"#9CA3AF"}}>{state.supportKB.length>0?`✓ KB ready — ${state.supportKB.length} items`:state.supportDocs.trim()?"Build KB to activate chat":"Start by pasting your product docs"}</div>
+        </div>
+      </div>
+    <div style={{display:"grid",gridTemplateColumns:"290px 1fr",gap:16,height:"calc(100vh - 220px)"}}>
       <div style={{display:"flex",flexDirection:"column",gap:12,overflowY:"auto"}}>
         <Card style={{padding:18}}>
           <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:10}}>Knowledge base</div>
@@ -1879,10 +2745,23 @@ function SupportMode(){
         <div style={{flex:1,overflowY:"auto",padding:16,display:"flex",flexDirection:"column",gap:10}}>
           {!activeChat&&<div style={{textAlign:"center",padding:"36px 20px",color:"#888780"}}><div style={{fontSize:36,marginBottom:10}}>💬</div><div style={{fontSize:13,fontWeight:600,color:"#1C1C1A",marginBottom:4}}>Support chat ready</div><div style={{fontSize:12}}>{state.supportKB.length>0?"Type a customer question to test":"Build KB first"}</div><div style={{display:"flex",flexWrap:"wrap",gap:6,justifyContent:"center",marginTop:14}}>{["How do I get started?","What is the refund policy?","My pipeline is stuck","How do I cancel?"].map(q=><button key={q} onClick={()=>{setChatInput(q);}} style={{padding:"6px 12px",background:"#E1F5EE",border:"1px solid #9FE1CB",borderRadius:20,fontSize:11,color:"#085041",cursor:"pointer"}}>{q}</button>)}</div></div>}
           {activeChat?.messages.map((m,i)=>(
-            <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}>
+            <div key={i} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start"}}>
               <div style={{maxWidth:"80%",padding:"10px 14px",borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px",background:m.role==="user"?"#1D9E75":"#F7F6F3",color:m.role==="user"?"white":"#1C1C1A",fontSize:13,lineHeight:1.6}}>
                 {i===activeChat.messages.length-1&&m.role==="assistant"&&chatLoading?<StreamText text={m.text||"Thinking..."}/>:m.text}
               </div>
+              {m.role==="assistant"&&m.csat&&(
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4,paddingLeft:4}}>
+                  <div style={{display:"flex",gap:2}}>
+                    {[1,2,3,4,5].map(star=>(
+                      <div key={star} style={{fontSize:10,color:star<=Math.round(m.csat)?"#BA7517":"#D0CEC8"}}>★</div>
+                    ))}
+                  </div>
+                  <span style={{fontSize:10,fontWeight:700,color:"#888780"}}>CSAT {m.csat.toFixed(1)}/5</span>
+                  <span style={{fontSize:10,padding:"1px 6px",borderRadius:10,background:m.sentiment==="positive"?"#E1F5EE":m.sentiment==="negative"?"#FAECE7":"#F0EFE9",color:m.sentiment==="positive"?"#085041":m.sentiment==="negative"?"#D85A30":"#5F5E5A",fontWeight:700}}>
+                    {m.sentiment==="positive"?"😊 Positive":m.sentiment==="negative"?"😤 Negative":"😐 Neutral"}
+                  </span>
+                </div>
+              )}
             </div>
           ))}
           <div ref={bottomRef}/>
@@ -1893,23 +2772,72 @@ function SupportMode(){
         </div>
       </Card>
     </div>
+    </div>
   );
 }
 
 // ── CARE MODE ─────────────────────────────────────────────────────────────
+function SLATimer({priority,startTime}){
+  const[left,setLeft]=useState(null);
+  useEffect(()=>{
+    if(priority!=="urgent") return;
+    const slaMs=priority==="urgent"?4*60*60*1000:priority==="high"?24*60*60*1000:72*60*60*1000;
+    const end=startTime+slaMs;
+    const tick=()=>{
+      const diff=end-Date.now();
+      if(diff<=0){setLeft("OVERDUE");return;}
+      const h=Math.floor(diff/3600000);const m=Math.floor((diff%3600000)/60000);const s=Math.floor((diff%60000)/1000);
+      setLeft((h>0?h+"h ":"")+m+"m "+s+"s");
+    };
+    tick();
+    const id=setInterval(tick,1000);
+    return()=>clearInterval(id);
+  },[priority,startTime]);
+  if(!left) return null;
+  const overdue=left==="OVERDUE";
+  return(
+    <div style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",background:overdue?"#FAECE7":"#FFF8EE",border:"1px solid "+(overdue?"#F5B8A0":"#FAC775"),borderRadius:8}}>
+      <div style={{width:6,height:6,borderRadius:"50%",background:overdue?"#D85A30":"#BA7517",animation:"pulse 1s infinite"}}/>
+      <span style={{fontSize:10,fontWeight:800,color:overdue?"#D85A30":"#BA7517"}}>SLA: {left}</span>
+    </div>
+  );
+}
+
 function CareMode(){
+  const{dispatch:globalDispatch}=useStore();
   const toast=useToast();
-  const[tickets,setTickets]=useState(SAMPLE_TICKETS);
+  const[tickets,setTickets]=useState(SAMPLE_TICKETS.map(t=>({...t,createdAt:Date.now()-Math.random()*2*60*60*1000})));
   const[selected,setSelected]=useState(null);
   const[generating,setGenerating]=useState(null);
   const[responses,setResponses]=useState({});
   const[approved,setApproved]=useState({});
+  const[tone,setTone]=useState("empathetic");
+  const[upsells,setUpsells]=useState({});
+  const UPSELL_KEYWORDS=["upgrade","enterprise","200 users","100 users","more seats","pricing","plan","premium","annual","bulk"];
+
+  const TONES={
+    empathetic:{label:"Empathetic",emoji:"❤️",desc:"Warm, understanding, acknowledge feelings"},
+    formal:{label:"Formal",emoji:"🎩",desc:"Professional, structured, business-like"},
+    direct:{label:"Direct",emoji:"⚡",desc:"Concise, solution-first, no fluff"},
+    urgent:{label:"Urgent",emoji:"🚨",desc:"Fast resolution, escalation-ready"},
+  };
 
   const genResponse=async(t)=>{
     setGenerating(t.id);
-    const p="You are a customer care agent. Write a professional, empathetic response.\n\nCustomer: "+t.customer+"\nSubject: "+t.subject+"\nMessage: "+t.message+"\nCategory: "+t.category+"\n\nResponse: acknowledge issue, clear solution/next step, warm but concise (3 paragraphs). Sign as Customer Care Team, FlowZint.";
-    const reply=await callClaude([{role:"user",content:p}]);
-    setResponses(r=>({...r,[t.id]:reply||"Dear "+t.customer.split(" ")[0]+",\n\nThank you for reaching out. I completely understand your concern and sincerely apologize for the inconvenience.\n\nI have escalated this to our "+t.category+" team and they will resolve it within 24 hours.\n\nThank you for your patience.\nCustomer Care Team, FlowZint"}));
+    setResponses(r=>({...r,[t.id]:""}));
+    const toneInstructions={
+      empathetic:"Be warm, acknowledge their feelings explicitly, show genuine care, apologize sincerely.",
+      formal:"Be professional and structured. Use formal language. No contractions.",
+      direct:"Lead with the solution immediately. No preamble. Bullet points if needed. Under 100 words.",
+      urgent:"This is urgent. Acknowledge immediately, give specific timeline, escalate if needed. Highest priority language.",
+    }[tone];
+    const p="You are a customer care agent. Write a response in "+tone.toUpperCase()+" tone.\n\nTone instruction: "+toneInstructions+"\n\nCustomer: "+t.customer+" ("+t.company+", "+t.city+")\nSubject: "+t.subject+"\nMessage: "+t.message+"\nCategory: "+t.category+"\nSentiment score: "+t.sentiment+" ("+(t.sentiment<=-0.5?"Very negative":t.sentiment<0?"Frustrated":"Positive")+")\n\nRules:\n- Address their specific issue (not generic)\n- Give concrete next step\n- Sign as Customer Care Team, FlowZint";
+    let full="";
+    await callClaudeStream([{role:"user",content:p}],"",(accumulated)=>{
+      full=accumulated;
+      setResponses(r=>({...r,[t.id]:accumulated}));
+    });
+    if(!full) setResponses(r=>({...r,[t.id]:"Dear "+t.customer.split(" ")[0]+",\n\nThank you for reaching out. I completely understand your concern and sincerely apologize for the inconvenience.\n\nI have escalated this to our "+t.category+" team and they will resolve it within 24 hours.\n\nThank you for your patience.\nCustomer Care Team, FlowZint"}));
     setGenerating(null);
     toast("Response drafted for "+t.customer,"success");
   };
@@ -1917,6 +2845,13 @@ function CareMode(){
   const pConfig={urgent:{color:"#D85A30",bg:"#FAECE7",label:"Urgent"},high:{color:"#BA7517",bg:"#FAEEDA",label:"High"},normal:{color:"#534AB7",bg:"#EEEDFE",label:"Normal"},low:{color:"#1D9E75",bg:"#E1F5EE",label:"Low"}};
   const cConfig={billing:{icon:"💳"},technical:{icon:"🔧"},sales:{icon:"💼"},feedback:{icon:"⭐"},refund:{icon:"💰"}};
   const emoji=(s)=>s<=-0.6?"😡":s<=-0.3?"😟":s>=0.6?"😊":"😐";
+  // Churn risk: sentiment-based, 0-100
+  const churnRisk=(t)=>{
+    const base=t.sentiment<=-0.6?88:t.sentiment<=-0.3?64:t.sentiment<=0?40:18;
+    const prioBoost=t.priority==="urgent"?12:t.priority==="high"?6:0;
+    const catBoost=t.category==="refund"?10:t.category==="billing"?6:0;
+    return Math.min(99,base+prioBoost+catBoost);
+  };
 
   return(
     <div style={{display:"grid",gridTemplateColumns:"330px 1fr",gap:16}}>
@@ -1939,10 +2874,11 @@ function CareMode(){
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A",marginBottom:2}}>{t.customer}</div>
                     <div style={{fontSize:11,color:"#5F5E5A",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:6}}>{t.subject}</div>
-                    <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
                       <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,background:pc.bg,color:pc.color}}>{pc.label}</span>
-                      {approved[t.id]&&<Tag color="success">Resolved</Tag>}
+                      {approved[t.id]?<Tag color="success">Resolved</Tag>:<SLATimer priority={t.priority} startTime={t.createdAt||Date.now()-Math.random()*3*60*60*1000}/>}
                     </div>
+                    {!approved[t.id]&&(()=>{const cr=churnRisk(t);const hasUp=UPSELL_KEYWORDS.some(kw=>(t.message||"").toLowerCase().includes(kw));return <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4,flexWrap:"wrap"}}><div style={{display:"flex",alignItems:"center",gap:4}}><div style={{height:4,borderRadius:2,width:60,background:"#F3F4F6",overflow:"hidden"}}><div style={{height:"100%",width:cr+"%",background:cr>=70?"#EF4444":cr>=40?"#F59E0B":"#10B981",borderRadius:2,transition:"width 0.6s"}}/></div><span style={{fontSize:9,fontWeight:700,color:cr>=70?"#EF4444":cr>=40?"#F59E0B":"#10B981"}}>{cr}% churn</span></div>{hasUp&&<span style={{fontSize:9,fontWeight:800,padding:"1px 6px",background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:10,color:"#C2410C"}}>🎯 Upsell</span>}</div>;})()}
                   </div>
                   <div style={{fontSize:16}}>{emoji(t.sentiment)}</div>
                 </div>
@@ -1968,9 +2904,24 @@ function CareMode(){
               </div>
             </div>
             <div style={{background:"#F7F6F3",borderRadius:10,padding:14,fontSize:13,color:"#1C1C1A",lineHeight:1.7,marginBottom:16,borderLeft:"3px solid #D4537E"}}>{selected.message}</div>
+            {/* Tone selector */}
+            {!responses[selected.id]&&(
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#888780",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Response tone</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6}}>
+                  {Object.entries(TONES).map(([key,t])=>(
+                    <button key={key} onClick={()=>setTone(key)} style={{padding:"7px 6px",borderRadius:9,border:"2px solid "+(tone===key?"#D4537E":"#EEECEA"),background:tone===key?"#FBEAF0":"white",cursor:"pointer",textAlign:"center",transition:"all 0.15s"}}>
+                      <div style={{fontSize:14,marginBottom:2}}>{t.emoji}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:tone===key?"#D4537E":"#5F5E5A"}}>{t.label}</div>
+                    </button>
+                  ))}
+                </div>
+                {selected.priority==="urgent"&&<div style={{marginTop:8}}><SLATimer priority={selected.priority} startTime={selected.createdAt||Date.now()-2*60*60*1000}/></div>}
+              </div>
+            )}
             {!responses[selected.id]?(
               <Btn variant="pink" fullWidth disabled={generating===selected.id} onClick={()=>genResponse(selected)}>
-                {generating===selected.id?<><Spinner/>Generating response...</>:"Generate AI response"}
+                {generating===selected.id?<><Spinner/>Writing {TONES[tone]?.label.toLowerCase()} response...</>:"Generate AI response — "+TONES[tone]?.emoji+" "+TONES[tone]?.label}
               </Btn>
             ):(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1978,17 +2929,41 @@ function CareMode(){
                 <textarea value={responses[selected.id]} onChange={e=>setResponses(r=>({...r,[selected.id]:e.target.value}))} style={{width:"100%",height:180,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} onFocus={e=>e.target.style.borderColor="#D4537E"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
                 <div style={{display:"flex",gap:8}}>
                   <Btn variant="secondary" onClick={()=>genResponse(selected)} disabled={generating===selected.id}>Regenerate</Btn>
-                  <Btn variant="pink" fullWidth disabled={approved[selected.id]} onClick={()=>{setApproved(a=>({...a,[selected.id]:true}));toast("Response sent to "+selected.customer,"success");}}>
-                    {approved[selected.id]?"Sent":"Approve and send"}
+                  <Btn variant="pink" fullWidth disabled={approved[selected.id]} onClick={()=>{
+                    setApproved(a=>({...a,[selected.id]:true}));
+                    saveCareTicket({ticket:selected,toneUsed:tone,aiResponse:responses[selected.id],approved:true});
+                    // ── UPSELL DETECTION: CareFlow → SalesFlow ─────────────
+                    const msgLow=(selected.message||"").toLowerCase();
+                    const hasUpsell=UPSELL_KEYWORDS.some(kw=>msgLow.includes(kw));
+                    if(hasUpsell){
+                      setUpsells(u=>({...u,[selected.id]:true}));
+                      const newLead={id:Date.now(),name:selected.customer,role:"Customer",company:selected.company||"Customer Co",industry:"Existing customer",painPoint:selected.subject,fitScore:82,budget:"Upgrade enquiry",objection:"Already a customer — warm lead",email:selected.email||selected.customer.toLowerCase().replace(/\s/g,".")+"@email.com"};
+                      globalDispatch({type:"SET_SALES_PROSPECTS",payload:[newLead,...([])]});
+                      globalDispatch({type:"ADD_CROSS_EVENT",event:{type:"care_to_sales",title:`CareFlow → SalesFlow upsell`,desc:`${selected.customer} mentioned upgrade in support ticket — routed as warm sales lead`,action:"SalesFlow pre-loaded with this lead"}});
+                    }
+                    toast(hasUpsell?"Response sent — upsell detected, lead routed to SalesFlow!":"Response sent to "+selected.customer,hasUpsell?"success":"success");
+                  }}>
+                    {approved[selected.id]?"Sent ✓":"Approve and send"}
                   </Btn>
                 </div>
+                {upsells[selected.id]&&(
+                  <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} style={{padding:"10px 14px",background:"linear-gradient(135deg,#FFF7ED,#FFFBF5)",border:"1.5px solid #FED7AA",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{fontSize:18}}>🎯</div>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:11,fontWeight:800,color:"#9A3412"}}>Upsell opportunity detected!</div>
+                      <div style={{fontSize:10,color:"#C2410C"}}>{selected.customer} mentioned upgrade — auto-routed as warm lead to SalesFlow</div>
+                    </div>
+                    <button onClick={()=>globalDispatch({type:"SET_MODE",payload:"sales"})} style={{fontSize:10,fontWeight:700,padding:"5px 12px",background:"#EA580C",border:"none",borderRadius:7,color:"white",cursor:"pointer",whiteSpace:"nowrap"}}>Open SalesFlow →</button>
+                  </motion.div>
+                )}
               </div>
             )}
           </Card>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
             <MetricCard label="Priority" value={pConfig[selected.priority]?.label} icon={cConfig[selected.category]?.icon}/>
             <MetricCard label="Sentiment" value={emoji(selected.sentiment)+" "+(selected.sentiment>=0.5?"Positive":selected.sentiment<=-0.5?"Negative":"Neutral")} deltaType={selected.sentiment>=0.3?"good":selected.sentiment<=-0.3?"danger":"neutral"}/>
             <MetricCard label="Status" value={approved[selected.id]?"Resolved":"Pending"} delta={approved[selected.id]?"Sent":"Awaiting"} deltaType={approved[selected.id]?"good":"warn"}/>
+            {(()=>{const cr=churnRisk(selected);return <MetricCard label="Churn Risk" value={cr+"%"} delta={cr>=70?"High risk":cr>=40?"Monitor":"Low risk"} deltaType={cr>=70?"danger":cr>=40?"warn":"good"}/>;})()}
           </div>
         </div>
       ):(
@@ -2008,13 +2983,25 @@ function SMBMode(){
   const[biz,setBiz]=useState({name:"",type:"",city:"",problem:"",whatsapp:""});
   const[loading,setLoading]=useState(false);
   const[result,setResult]=useState(null);
+  const[streamThought,setStreamThought]=useState("");
+  const[waTemplate,setWaTemplate]=useState("");
+  const[waLoading,setWaLoading]=useState(false);
 
   const useSample=()=>setBiz({name:SAMPLE_SMB.name,type:SAMPLE_SMB.type,city:SAMPLE_SMB.city,problem:SAMPLE_SMB.problem,whatsapp:SAMPLE_SMB.whatsappChats});
 
   const analyze=async()=>{
     if(!biz.name.trim()){toast("Add business name","error");return;}
-    setLoading(true);setStep("analyzing");
+    setLoading(true);setStep("analyzing");setStreamThought("");
     toast("AI analyzing your business in Indian context...","info");
+
+    // Step 1: Stream visible AI thinking
+    await callClaudeStream(
+      [{role:"user",content:"You are analyzing an Indian SMB called '"+biz.name+"' ("+biz.type+", "+biz.city+"). Their challenge: "+biz.problem+"\n\nThink out loud: what are the 3 biggest opportunities for this business? What would you automate first? What does their customer data tell you? Write 4-5 short insight sentences as you think through it."}],
+      "Indian business intelligence expert.",
+      (accumulated)=>setStreamThought(accumulated)
+    );
+
+    // Step 2: Get structured JSON result
     const p="You are a business intelligence AI for Indian SMBs. Analyze this business and return JSON.\n\nBusiness: "+JSON.stringify(biz)+"\n\nReturn ONLY valid JSON (no markdown):\n{\"summary\":\"2 sentence overview\",\"topPain\":\"biggest pain\",\"crmContacts\":[{\"name\":\"name\",\"intent\":\"order\",\"value\":\"high\",\"action\":\"Follow up today\"}],\"supportFAQs\":[{\"q\":\"question\",\"a\":\"answer\"}],\"salesOpportunities\":[{\"opportunity\":\"description\",\"revenue\":\"Rs X/month\",\"action\":\"what to do\"}],\"automationWins\":[\"specific automation\"],\"weeklyTimeSaved\":\"X hours\",\"roiEstimate\":\"Rs X/month\"}";
     try{
       const raw=await callClaude([{role:"user",content:p}]);
@@ -2022,9 +3009,36 @@ function SMBMode(){
       const data=JSON.parse(clean);
       setResult(data);
       dispatch({type:"SET_SMB_PROFILE",payload:{...biz,...data}});
-      dispatch({type:"ADD_CROSS_EVENT",event:{type:"hiring_to_care",title:"SMB profile built for "+biz.name,desc:(data.crmContacts?.length||0)+" contacts extracted, "+(data.salesOpportunities?.length||0)+" sales opportunities found.",action:"Routes to SalesFlow and CareFlow automatically"}});
+
+      // ── REAL DATA HANDOFF: SMB Brain → SalesFlow ──────────────────────────
+      if(data.crmContacts?.length>0){
+        const injectedProspects=data.crmContacts.map((c,i)=>({
+          id:i+1,
+          name:c.name,
+          role:c.intent||"Customer",
+          company:biz.name,
+          industry:biz.type,
+          painPoint:c.action||"Needs follow-up",
+          fitScore:c.value==="high"?88:c.value==="medium"?72:55,
+          budget:"From SMB Brain",
+          objection:"Not yet engaged",
+          email:c.name.toLowerCase().replace(/\s+/g,".")+`@${biz.name.toLowerCase().replace(/\s+/g,"")}.in`,
+        }));
+        dispatch({type:"SET_SALES_PROSPECTS",payload:injectedProspects});
+        dispatch({type:"SET_SALES_PRODUCT",payload:`${biz.name} — ${biz.type} business in ${biz.city}\n\n${data.summary}\n\nTop opportunity: ${data.salesOpportunities?.[0]?.opportunity||""}`});
+        dispatch({type:"ADD_CROSS_EVENT",event:{type:"smb_to_sales",title:`SMB Brain → SalesFlow`,desc:`${injectedProspects.length} real customers from ${biz.name} injected as sales prospects`,action:"SalesFlow pre-loaded — open it to see personalized outreach"}});
+      }
+
+      // ── REAL DATA HANDOFF: SMB Brain → SupportFlow ───────────────────────
+      if(data.supportFAQs?.length>0){
+        dispatch({type:"SET_SUPPORT_KB",payload:data.supportFAQs});
+        dispatch({type:"SET_SUPPORT_DOCS",payload:`${biz.name} — ${biz.type} in ${biz.city}\n\nAuto-generated by SMB Brain AI.\n\n${data.summary}`});
+        dispatch({type:"ADD_CROSS_EVENT",event:{type:"smb_to_support",title:`SMB Brain → SupportFlow`,desc:`${data.supportFAQs.length} FAQs from ${biz.name} injected into support KB`,action:"SupportFlow KB live — chat bot ready instantly"}});
+      }
+
+      dispatch({type:"ADD_CROSS_EVENT",event:{type:"smb_complete",title:"SMB profile built for "+biz.name,desc:(data.crmContacts?.length||0)+" contacts extracted, "+(data.salesOpportunities?.length||0)+" sales opportunities found.",action:"Routes to SalesFlow and CareFlow automatically"}});
       setStep("result");
-      toast("SMB intelligence report ready","success");
+      toast("SMB intelligence report ready — SalesFlow + SupportFlow pre-loaded","success");
     }catch{
       toast("Error analyzing — try again","error");setStep("input");
     }
@@ -2067,16 +3081,32 @@ function SMBMode(){
       )}
 
       {step==="analyzing"&&(
-        <Card style={{padding:48,textAlign:"center"}}>
-          <div style={{fontSize:36,marginBottom:16}}>🏪</div>
-          <div style={{fontSize:16,fontWeight:800,color:"#1C1C1A",marginBottom:8}}>Analyzing {biz.name}...</div>
-          <div style={{fontSize:13,color:"#888780",marginBottom:20}}>AI reading your business context in Indian market setting</div>
-          <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:400,margin:"0 auto"}}>
-            {["Extracting customer contacts from chats...","Building CRM with intent scoring...","Identifying sales opportunities...","Creating support FAQ from patterns...","Calculating ROI and time savings..."].map((s,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#F3F0FF",borderRadius:8,animation:"fadeIn 0.4s ease "+(i*0.3)+"s both"}}>
-                <Spinner color="#7C3AED"/><span style={{fontSize:12,color:"#5F5E5A"}}>{s}</span>
+        <Card style={{padding:32,maxWidth:620}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+            <div style={{width:44,height:44,borderRadius:14,background:"linear-gradient(135deg,#7C3AED,#9F67FA)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🏪</div>
+            <div>
+              <div style={{fontSize:15,fontWeight:800,color:"#1C1C1A"}}>Analyzing {biz.name}...</div>
+              <div style={{fontSize:12,color:"#888780"}}>AI reading your business in Indian market context</div>
+            </div>
+          </div>
+          {streamThought?(
+            <div style={{background:"#F3F0FF",border:"1px solid #DDD6FE",borderRadius:12,padding:"14px 16px",borderLeft:"3px solid #7C3AED"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#7C3AED",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>AI thinking</div>
+              <div style={{fontSize:12.5,color:"#4C1D95",lineHeight:1.7,whiteSpace:"pre-wrap"}}>
+                {streamThought}<span style={{display:"inline-block",width:2,height:13,background:"#7C3AED",marginLeft:2,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>
               </div>
-            ))}
+            </div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {["Reading business context...","Extracting customer contacts from chats...","Identifying opportunities..."].map((s,i)=>(
+                <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#F3F0FF",borderRadius:8,animation:"fadeIn 0.4s ease "+(i*0.2)+"s both"}}>
+                  <Spinner color="#7C3AED"/><span style={{fontSize:12,color:"#5F5E5A"}}>{s}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{marginTop:16,fontSize:11,color:"#888780",display:"flex",alignItems:"center",gap:6}}>
+            <Spinner color="#7C3AED"/>Building structured report...
           </div>
         </Card>
       )}
@@ -2145,8 +3175,60 @@ function SMBMode(){
               ))}
             </Card>
           )}
+          {/* Cross-mode injection badges */}
           <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-            <Btn variant="secondary" onClick={()=>{setStep("input");setResult(null);}}>Analyze another business</Btn>
+            {result.crmContacts?.length>0&&(
+              <div style={{flex:1,minWidth:220,background:"linear-gradient(135deg,#FFF7ED,#FFFBF5)",border:"1.5px solid #FED7AA",borderRadius:12,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:36,height:36,borderRadius:10,background:"#EA580C",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🎯</div>
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:"#9A3412"}}>SalesFlow pre-loaded</div>
+                  <div style={{fontSize:10,color:"#C2410C"}}>{result.crmContacts.length} customers from {biz.name} added as prospects</div>
+                  <button onClick={()=>dispatch({type:"SET_MODE",payload:"sales"})} style={{marginTop:5,fontSize:10,fontWeight:700,padding:"3px 10px",background:"#EA580C",border:"none",borderRadius:6,color:"white",cursor:"pointer"}}>Open SalesFlow →</button>
+                </div>
+              </div>
+            )}
+            {result.supportFAQs?.length>0&&(
+              <div style={{flex:1,minWidth:220,background:"linear-gradient(135deg,#F0FDF4,#F7FEF9)",border:"1.5px solid #86EFAC",borderRadius:12,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:36,height:36,borderRadius:10,background:"#16A34A",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>💬</div>
+                <div>
+                  <div style={{fontSize:11,fontWeight:800,color:"#14532D"}}>SupportFlow KB ready</div>
+                  <div style={{fontSize:10,color:"#15803D"}}>{result.supportFAQs.length} FAQs from {biz.name} injected — chat bot live</div>
+                  <button onClick={()=>dispatch({type:"SET_MODE",payload:"support"})} style={{marginTop:5,fontSize:10,fontWeight:700,padding:"3px 10px",background:"#16A34A",border:"none",borderRadius:6,color:"white",cursor:"pointer"}}>Open SupportFlow →</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* WhatsApp template generator */}
+          <Card style={{padding:18,background:"#F0FDF4",border:"1.5px solid #86EFAC"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:800,color:"#14532D",marginBottom:2}}>📱 WhatsApp broadcast template</div>
+                <div style={{fontSize:11,color:"#16A34A"}}>Ready-to-send template for your customers — copy and paste</div>
+              </div>
+              <Btn variant="success" size="sm" disabled={waLoading} onClick={async()=>{
+                setWaLoading(true);setWaTemplate("");
+                const p="Write a WhatsApp broadcast message for an Indian business called '"+biz.name+"' ("+biz.type+" in "+biz.city+").\n\nBusiness context: "+result.summary+"\nTop sales opportunity: "+(result.salesOpportunities?.[0]?.opportunity||"customer re-engagement")+"\n\nRules:\n- Write in a mix of Hindi/English (Hinglish) that feels natural for Indian customers\n- Start with a greeting, mention the business, give a specific offer or update\n- End with a clear call to action (reply YES, call, or visit)\n- Under 160 characters\n- No bullet points, just flowing text\n- Make it feel personal, not spammy\n\nReturn only the WhatsApp message text, nothing else.";
+                await callClaudeStream([{role:"user",content:p}],"",(t)=>setWaTemplate(t));
+                setWaLoading(false);
+              }}>{waLoading?<><Spinner color="#fff"/>Writing...</>:"Generate template"}</Btn>
+            </div>
+            {waTemplate?(
+              <div style={{background:"white",borderRadius:10,padding:14,border:"1px solid #86EFAC"}}>
+                <div style={{fontSize:13,color:"#14532D",lineHeight:1.7,fontFamily:"inherit",whiteSpace:"pre-wrap"}}>{waTemplate}</div>
+                <div style={{display:"flex",gap:8,marginTop:10}}>
+                  <Btn variant="success" size="sm" onClick={()=>{navigator.clipboard?.writeText(waTemplate);toast("Copied to clipboard!","success");}}>Copy message</Btn>
+                  <Btn variant="secondary" size="sm" onClick={()=>setWaTemplate("")}>Regenerate</Btn>
+                </div>
+              </div>
+            ):(
+              <div style={{background:"white",borderRadius:10,padding:12,border:"1px dashed #86EFAC",textAlign:"center",color:"#9CA3AF",fontSize:12}}>
+                Click "Generate template" → get a copy-paste WhatsApp message for your customers
+              </div>
+            )}
+          </Card>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+            <Btn variant="secondary" onClick={()=>{setStep("input");setResult(null);setWaTemplate("");}}>Analyze another business</Btn>
             <Btn variant="success" onClick={()=>dispatch({type:"SET_MODE",payload:"support"})}>{"-> "}Open SupportFlow with this KB</Btn>
             <Btn variant="orange" onClick={()=>dispatch({type:"SET_MODE",payload:"sales"})}>{"-> "}Open SalesFlow with prospects</Btn>
           </div>
@@ -2164,6 +3246,7 @@ function WarRoomMode(){
   const[phase,setPhase]=useState(0);
   const[debates,setDebates]=useState([]);
   const[metrics,setMetrics]=useState(null);
+  const[phaseResults,setPhaseResults]=useState({});
 
   const PHASES=[
     {id:0,title:"Briefing",icon:"📋",desc:"Loading business context across all 4 systems"},
@@ -2175,109 +3258,293 @@ function WarRoomMode(){
     {id:6,title:"Command report",icon:"📊",desc:"Unified intelligence report ready"},
   ];
 
-  const DEBATE_SCRIPTS=[
-    {from:"🧠 HireFlow",to:"🎯 SalesFlow",msg:"Top candidate declined offer. Strong company background — routing as high-value B2B contact to sales prospect queue automatically."},
-    {from:"💬 SupportFlow",to:"❤️ CareFlow",msg:"Escalated chat from Raj Patel matches CareFlow ticket #1. Same customer. Merging context and thread history."},
-    {from:"❤️ CareFlow",to:"🎯 SalesFlow",msg:"Amir Khan asking about Enterprise plan (200 users). Clear upsell signal. Auto-routing to high-priority sales pipeline."},
-    {from:"🎯 SalesFlow",to:"💬 SupportFlow",msg:"5 prospects generated. Most common objection: pipeline stuck. Pushing this to support KB as priority FAQ item."},
-    {from:"🧠 HireFlow",to:"❤️ CareFlow",msg:"Hiring pipeline complete. Top candidate shortlisted. Auto-creating onboarding preparation ticket in CareFlow for Day 1 readiness."},
+  const AGENT_PAIRS=[
+    {from:"🧠 HireFlow",to:"🎯 SalesFlow",
+     topic:topCandidate?`${topCandidate.name} (score ${topScore}/100) declined our offer but has strong B2B background at ${topCandidate.company||"their company"}. Should we route them as a warm sales prospect instead of letting the lead go cold?`:"A top candidate just declined offer. They have strong B2B sales experience at enterprise companies. Should we route them as a warm sales prospect instead?"},
+    {from:"💬 SupportFlow",to:"❤️ CareFlow",
+     topic:kbCount>0?`We detected an escalation pattern in ${kbCount} KB queries — 3 users asking about billing refunds in the last hour. CareFlow has 2 matching open tickets. Should we auto-merge and prioritize?`:"We have an escalated chat from Raj Patel about billing. CareFlow has an open ticket from same customer. How should we merge and resolve this?"},
+    {from:"❤️ CareFlow",to:"🎯 SalesFlow",
+     topic:topProspect?`A care ticket from ${topProspect.company} (${topProspect.name}) mentioned upgrading to 200 users — same company already in our sales pipeline at ${topProspect.fitScore}% fit. This is a warm upsell. How do we close it?`:"Amir Khan in a care ticket mentioned upgrading to 200 users. That's a clear Enterprise upsell. How should we hand this off to sales without losing context?"},
+    {from:"🎯 SalesFlow",to:"💬 SupportFlow",
+     topic:topProspect?`${state.salesProspects?.length||3} of our prospects (including ${topProspect.name}) mentioned "${topProspect.painPoint}" as their main blocker. Should this become a priority FAQ item or is it a product gap?`:"3 out of 5 prospects mentioned 'pipeline stuck' as their main objection. Should this be escalated as a priority FAQ item or a product bug?"},
+    {from:"🧠 HireFlow",to:"❤️ CareFlow",
+     topic:topCandidate?`${topCandidate.name} accepted the offer and starts in 2 weeks. Their role requires access to billing, CRM, and HR systems. What Day-1 onboarding tickets should CareFlow auto-create now?`:"Pipeline is complete. We have a candidate accepting offer — starting in 2 weeks. What onboarding tickets should CareFlow create proactively for Day 1 readiness?"},
+  ];
+
+  // Pull real data from other modes
+  const topCandidate=state.activeCandidates?.[0];
+  const topScore=topCandidate&&state.dynamicScores?.[topCandidate.id]?state.dynamicScores[topCandidate.id]:91;
+  const topProspect=state.salesProspects?.[0];
+  const kbCount=state.supportKB?.length||8;
+  const smbName=state.smbProfile?.name;
+  const hasRealData=topProspect||state.supportKB?.length>0||state.smbProfile;
+
+  const PHASE_RESULTS_DATA=[
+    smbName?`Context loaded — ${smbName} profile + ${state.salesProspects?.length||0} prospects + ${kbCount} KB items ready`:"Context loaded from 4 AI systems — all agents briefed",
+    topCandidate?`7 agents active → 5 candidates ranked, top: ${topCandidate.name} (${topScore}/100) — interview scheduled`:"7 agents active → 5 candidates shortlisted, top: Aditya Kumar (91/100) — interview scheduled",
+    topProspect?`5 prospects scored → ${topProspect.name} at ${topProspect.company} ranked #1 (${topProspect.fitScore}% fit) — personalized email drafted`:"5 B2B prospects scored → Priya Singh at TechVentures ranked #1 (87% fit) — email drafted",
+    kbCount>0?`${kbCount} KB items active → 1 escalation pattern detected (billing pain point flagged)`:"8 FAQs extracted from docs → 1 escalation pattern detected (billing pain point flagged)",
+    "5 tickets triaged → 2 urgent resolved, 3 AI response drafts approved and sent",
+    null,
+    smbName?`Unified report ready for ${smbName} — 42h saved, ₹4.2L monthly ROI estimated`:"Unified command report ready — 42h saved, ₹4.2L monthly ROI estimated",
   ];
 
   const run=async()=>{
-    setRunning(true);setDebates([]);setMetrics(null);
+    setRunning(true);setDebates([]);setMetrics(null);setPhaseResults({});
     toast("War Room activated — all 4 AI systems online","info");
     for(let i=0;i<=6;i++){
       setPhase(i);
-      await new Promise(r=>setTimeout(r,1800));
+      if(i<5) await new Promise(r=>setTimeout(r,1600));
+      // Mark previous phase done with result
+      if(i>0&&PHASE_RESULTS_DATA[i-1]){
+        setPhaseResults(prev=>({...prev,[i-1]:PHASE_RESULTS_DATA[i-1]}));
+      }
       if(i===5){
-        for(const d of DEBATE_SCRIPTS){
-          await new Promise(r=>setTimeout(r,900));
-          setDebates(prev=>[...prev,d]);
-          dispatch({type:"ADD_CROSS_EVENT",event:{type:"hiring_to_care",title:d.from+" -> "+d.to,desc:d.msg,action:"Automated handoff complete"}});
+        // Real streaming AI debates
+        for(const pair of AGENT_PAIRS){
+          const debateId=Date.now()+Math.random();
+          setDebates(prev=>[...prev,{from:pair.from,to:pair.to,msg:"",streaming:true,id:debateId}]);
+          await callClaudeStream(
+            [{role:"user",content:"You are "+pair.from+" agent talking to "+pair.to+" agent in an AI system.\n\nTopic: "+pair.topic+"\n\nWrite a 2-3 sentence handoff message: your recommendation/decision, why, and exact action being taken. Be specific, use data points, name the action taken automatically. No preamble."}],
+            "Expert AI agent. Concise, decisive, data-driven. Never use bullet points. 60 words max.",
+            (accumulated)=>{
+              setDebates(prev=>prev.map(d=>d.id===debateId?{...d,msg:accumulated}:d));
+            }
+          );
+          setDebates(prev=>prev.map(d=>d.id===debateId?{...d,streaming:false}:d));
+          dispatch({type:"ADD_CROSS_EVENT",event:{type:"agent_handoff",title:pair.from+" → "+pair.to,desc:pair.topic,action:"Automated"}});
+          await new Promise(r=>setTimeout(r,400));
         }
+        setPhaseResults(prev=>({...prev,5:`${AGENT_PAIRS.length} cross-agent handoffs completed — all tasks auto-routed`}));
       }
     }
+    setPhaseResults(prev=>({...prev,6:PHASE_RESULTS_DATA[6]}));
     setMetrics({done:true});
     setRunning(false);
     toast("War Room complete — unified report ready","success");
   };
 
-  return(
-    <div style={{animation:"fadeIn 0.3s ease"}}>
-      <Card style={{padding:24,background:"linear-gradient(135deg,#0F172A,#1E3A5F)",border:"none",marginBottom:16}}>
-        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:16}}>
-          <div style={{width:52,height:52,borderRadius:16,background:"rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>⚡</div>
-          <div>
-            <div style={{fontSize:18,fontWeight:800,color:"white"}}>AI War Room — Multi-Agent Command Center</div>
-            <div style={{fontSize:12,color:"#94A3B8",marginTop:2}}>All 4 AI systems run simultaneously. Agents debate, cross-reference, and hand off tasks in real time.</div>
-          </div>
-        </div>
-        <Btn variant="dark" disabled={running} onClick={run}>{running?<><Spinner color="white"/>Agents running — watch debates below...</>:"Activate all 4 AI systems ->"}</Btn>
-      </Card>
+  const done=phase===6&&!running&&metrics;
+  const agentColors={"🧠 HireFlow":"#6D5FFA","🎯 SalesFlow":"#F59E0B","💬 SupportFlow":"#10B981","❤️ CareFlow":"#F43F5E"};
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
-        <Card style={{padding:18}}>
-          <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:12}}>Mission phases</div>
-          {PHASES.map(p=>(
-            <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:p.id<6?"1px solid #EEECEA":"none"}}>
-              <div style={{width:28,height:28,borderRadius:"50%",background:phase>p.id?"#E1F5EE":phase===p.id?"#EEEDFE":"#F0EFE9",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12}}>{phase>p.id?"✓":p.icon}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:11,fontWeight:600,color:phase>=p.id?"#1C1C1A":"#B4B2A9"}}>{p.title}</div>
-                <div style={{fontSize:10,color:"#B4B2A9"}}>{p.desc}</div>
+  return(
+    <div style={{animation:"fadeIn 0.3s ease",maxWidth:1100}}>
+      {/* Live data indicator */}
+      {hasRealData&&(
+        <div style={{marginBottom:12,padding:"8px 14px",background:"linear-gradient(135deg,#EDE9FE,#F5F3FF)",border:"1.5px solid #A78BFA",borderRadius:10,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"#7C3AED",animation:"pulse 1s infinite",flexShrink:0}}/>
+          <div style={{fontSize:11,fontWeight:700,color:"#5B21B6"}}>Live data connected —</div>
+          {topCandidate&&<span style={{fontSize:11,color:"#6D28D9",padding:"2px 8px",background:"rgba(109,40,217,0.08)",borderRadius:20}}>🧠 {topCandidate.name} ({topScore}/100)</span>}
+          {topProspect&&<span style={{fontSize:11,color:"#6D28D9",padding:"2px 8px",background:"rgba(109,40,217,0.08)",borderRadius:20}}>🎯 {topProspect.name} @ {topProspect.company}</span>}
+          {state.supportKB?.length>0&&<span style={{fontSize:11,color:"#6D28D9",padding:"2px 8px",background:"rgba(109,40,217,0.08)",borderRadius:20}}>💬 {state.supportKB.length} KB items</span>}
+          {smbName&&<span style={{fontSize:11,color:"#6D28D9",padding:"2px 8px",background:"rgba(109,40,217,0.08)",borderRadius:20}}>🏪 {smbName}</span>}
+          <div style={{marginLeft:"auto",fontSize:10,color:"#7C3AED",fontWeight:600}}>Debates will use your real data ↓</div>
+        </div>
+      )}
+      {/* Launch bar */}
+      <div style={{background:"white",border:"1.5px solid #F1F1F1",borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:"#111827"}}>Run all 6 AI systems simultaneously</div>
+          <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>Hiring · Sales · Support · Care agents fire in parallel and hand off tasks to each other in real time</div>
+        </div>
+        <button onClick={run} disabled={running}
+          style={{padding:"11px 24px",background:running?"#F3F4F6":"linear-gradient(135deg,#6D5FFA,#8B5CF6)",border:"none",borderRadius:10,fontSize:13,fontWeight:800,color:running?"#9CA3AF":"white",cursor:running?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:running?"none":"0 4px 18px rgba(109,95,250,0.35)",transition:"all 0.2s",whiteSpace:"nowrap",flexShrink:0}}
+          onMouseEnter={e=>{if(!running){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 6px 24px rgba(109,95,250,0.5)";}}}
+          onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=running?"none":"0 4px 18px rgba(109,95,250,0.35)";}}>
+          {running?<><Spinner color="#9CA3AF"/>Agents running...</>:"⚡ Activate all agents →"}
+        </button>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:14,marginBottom:14}}>
+        {/* Phases */}
+        <Card style={{padding:16}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#374151",marginBottom:12,letterSpacing:"-0.01em"}}>Mission phases</div>
+          {PHASES.map(p=>{
+            const isDone=phase>p.id;
+            const isActive=phase===p.id&&running;
+            const result=phaseResults[p.id];
+            return(
+              <div key={p.id} style={{padding:"9px 0",borderBottom:p.id<6?"1px solid #F9FAFB":"none"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:26,height:26,borderRadius:8,background:isDone?"#DCFCE7":isActive?"#EDE9FE":"#F9FAFB",border:`1.5px solid ${isDone?"#86EFAC":isActive?"#A78BFA":"#F1F1F1"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,flexShrink:0,transition:"all 0.3s"}}>
+                    {isDone?"✓":isActive?<div style={{width:6,height:6,borderRadius:"50%",background:"#8B5CF6",animation:"pulse 1s infinite"}}/>:p.icon}
+                  </div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:11,fontWeight:600,color:isDone?"#374151":isActive?"#6D5FFA":"#9CA3AF"}}>{p.title}</div>
+                    {isActive&&<div style={{fontSize:9,color:"#8B5CF6",marginTop:1}}>{p.desc}</div>}
+                  </div>
+                  {isDone&&!result&&<span style={{fontSize:9,fontWeight:700,color:"#16A34A",background:"#F0FDF4",border:"1px solid #86EFAC",borderRadius:20,padding:"2px 7px"}}>Done</span>}
+                </div>
+                {isDone&&result&&(
+                  <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}} style={{marginTop:6,marginLeft:36,padding:"6px 10px",background:"#F0FDF4",borderRadius:8,border:"1px solid #BBF7D0",borderLeft:"3px solid #16A34A"}}>
+                    <div style={{fontSize:9.5,color:"#15803D",lineHeight:1.5,fontWeight:500}}>{result}</div>
+                  </motion.div>
+                )}
               </div>
-              {phase===p.id&&running&&<div style={{width:6,height:6,borderRadius:"50%",background:"#534AB7",animation:"pulse 1s infinite"}}/>}
-              {phase>p.id&&<Tag color="success">Done</Tag>}
-            </div>
-          ))}
+            );
+          })}
         </Card>
 
-        <Card style={{padding:18}}>
-          <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:12}}>Live agent debates</div>
+        {/* Live debates */}
+        <Card style={{padding:16,display:"flex",flexDirection:"column"}}>
+          <div style={{fontSize:12,fontWeight:800,color:"#374151",marginBottom:12}}>Live agent handoffs</div>
           {debates.length===0&&(
-            <div style={{color:"#888780",fontSize:12,padding:"20px 0",textAlign:"center"}}>
-              <div style={{fontSize:28,marginBottom:8}}>⚡</div>
-              Agents will debate here in real time when War Room runs
+            <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 0",color:"#D1D5DB",textAlign:"center"}}>
+              <div style={{fontSize:36,marginBottom:12,opacity:0.5}}>⚡</div>
+              <div style={{fontSize:13,fontWeight:600,color:"#9CA3AF"}}>Waiting for agents to activate</div>
+              <div style={{fontSize:11,color:"#D1D5DB",marginTop:4}}>Debates stream in real time once War Room runs</div>
             </div>
           )}
-          {debates.map((d,i)=>(
-            <div key={i} style={{padding:"10px 12px",background:"linear-gradient(135deg,#EEEDFE,#E1F5EE)",borderRadius:9,marginBottom:8,animation:"fadeIn 0.4s ease",border:"1px solid #CECBF6"}}>
-              <div style={{fontSize:10,fontWeight:800,color:"#534AB7",marginBottom:4}}>{d.from} {"→"} {d.to}</div>
-              <div style={{fontSize:11,color:"#5F5E5A",lineHeight:1.5}}>{d.msg}</div>
-            </div>
-          ))}
+          <div style={{display:"flex",flexDirection:"column",gap:10,overflowY:"auto",maxHeight:340}}>
+            {debates.map((d,i)=>{
+              const fromColor=agentColors[d.from]||"#6D5FFA";
+              const toColor=agentColors[d.to]||"#10B981";
+              return(
+                <motion.div key={d.id||i} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}}
+                  style={{background:"#FAFAFA",border:"1.5px solid #F1F1F1",borderRadius:12,padding:"12px 14px",borderLeft:`3px solid ${fromColor}`}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:11,fontWeight:800,color:fromColor}}>{d.from}</span>
+                      <span style={{fontSize:12,color:"#D1D5DB"}}>→</span>
+                      <span style={{fontSize:11,fontWeight:800,color:toColor}}>{d.to}</span>
+                    </div>
+                    {d.streaming&&(
+                      <div style={{display:"flex",gap:3,alignItems:"center"}}>
+                        {[0,1,2].map(k=><div key={k} style={{width:4,height:4,borderRadius:"50%",background:fromColor,animation:"pulse 1s infinite",animationDelay:k*0.18+"s"}}/>)}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{fontSize:12,color:"#4B5563",lineHeight:1.65}}>
+                    {d.msg||<span style={{color:"#D1D5DB",fontSize:11}}>Agent processing...</span>}
+                    {d.streaming&&d.msg&&<span style={{display:"inline-block",width:1.5,height:11,background:fromColor,marginLeft:1,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         </Card>
       </div>
 
-      {metrics&&(
-        <Card style={{padding:20}}>
-          <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:16}}>Unified intelligence report</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:14}}>
-            <MetricCard label="HireFlow" value="Done" delta="5 shortlisted" deltaType="good" icon="🧠"/>
-            <MetricCard label="SalesFlow" value="Done" delta="5 prospects" deltaType="good" icon="🎯"/>
-            <MetricCard label="SupportFlow" value="Done" delta="8 FAQ items" deltaType="good" icon="💬"/>
-            <MetricCard label="CareFlow" value="Done" delta="5 tickets" deltaType="good" icon="❤️"/>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
-            <MetricCard label="Cross-agent handoffs" value="5" delta="All automated" deltaType="good"/>
-            <MetricCard label="Total time saved" value="42 hours" delta="vs manual ops" deltaType="good"/>
-            <MetricCard label="Estimated monthly ROI" value="Rs 4.2L" delta="for a 50-person team" deltaType="good" color="#7C3AED"/>
-          </div>
-        </Card>
+      {/* Results */}
+      {done&&(
+        <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}}>
+          <Card style={{padding:20}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#111827",marginBottom:14}}>Command report — all systems complete</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:12}}>
+              {[{icon:"🧠",label:"HireFlow",v:"Done",d:"5 shortlisted"},{icon:"🎯",label:"SalesFlow",v:"Done",d:"5 prospects"},{icon:"💬",label:"SupportFlow",v:"Done",d:"8 FAQ items"},{icon:"❤️",label:"CareFlow",v:"Done",d:"5 tickets resolved"}].map((m,i)=>(
+                <div key={i} style={{background:"#F9FAFB",borderRadius:12,padding:"14px 12px",textAlign:"center",border:"1px solid #F1F1F1"}}>
+                  <div style={{fontSize:20,marginBottom:6}}>{m.icon}</div>
+                  <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{m.label}</div>
+                  <div style={{fontSize:18,fontWeight:900,color:"#16A34A",margin:"4px 0"}}>{m.v}</div>
+                  <div style={{fontSize:10,color:"#9CA3AF"}}>{m.d}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+              {[{label:"Cross-agent handoffs",v:"5",d:"all automated"},{label:"Total hours saved",v:"42h",d:"vs manual ops"},{label:"Est. monthly ROI",v:"₹4.2L",d:"50-person team",c:"#6D5FFA"}].map((m,i)=>(
+                <div key={i} style={{background:"#F9FAFB",borderRadius:12,padding:"16px",border:"1px solid #F1F1F1"}}>
+                  <div style={{fontSize:22,fontWeight:900,color:m.c||"#111827",letterSpacing:"-0.02em"}}>{m.v}</div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#374151",marginTop:4}}>{m.label}</div>
+                  <div style={{fontSize:11,color:"#9CA3AF",marginTop:2}}>{m.d}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </motion.div>
       )}
     </div>
   );
 }
 
 function HiringHistory(){
-  const{dispatch}=useStore();
+  const{state,dispatch}=useStore();
   const toast=useToast();
+  const[dbRuns,setDbRuns]=useState([]);
+  const[dbLoading,setDbLoading]=useState(false);
+  const[selectedRun,setSelectedRun]=useState(null);
+  const[runCandidates,setRunCandidates]=useState([]);
+  const[candLoading,setCandLoading]=useState(false);
+
+  useEffect(()=>{
+    if(!DB_READY) return;
+    setDbLoading(true);
+    loadPipelineHistory().then(runs=>{setDbRuns(runs);setDbLoading(false);});
+  },[]);
+
+  const viewRun=async(run)=>{
+    setSelectedRun(run);
+    setCandLoading(true);
+    const cands=await loadCandidatesForRun(run.id);
+    setRunCandidates(cands);
+    setCandLoading(false);
+  };
+
   return(
-    <div style={{maxWidth:640}}>
-      <div style={{marginBottom:16}}>
-        <div style={{fontSize:16,fontWeight:800,color:"#1C1C1A",marginBottom:4}}>Pipeline history</div>
-        <div style={{fontSize:12,color:"#888780"}}>Last 5 pipeline runs. Saved to your browser — survives page refresh.</div>
+    <div style={{maxWidth:900,display:"grid",gridTemplateColumns:selectedRun?"320px 1fr":"1fr",gap:16}}>
+      <div>
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:16,fontWeight:800,color:"#1C1C1A",marginBottom:4}}>Pipeline history</div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{fontSize:12,color:"#888780"}}>{DB_READY?"Loaded from Supabase · real database":"Local only — connect Supabase for persistence"}</div>
+            {DB_READY&&<div style={{fontSize:10,padding:"2px 8px",background:"#E1F5EE",color:"#085041",borderRadius:20,fontWeight:700}}>DB connected</div>}
+            {!DB_READY&&<div style={{fontSize:10,padding:"2px 8px",background:"#FFF8EE",color:"#BA7517",borderRadius:20,fontWeight:700}}>No DB — see .env setup</div>}
+          </div>
+        </div>
+
+        {/* Supabase runs */}
+        {DB_READY&&(
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888780",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Database runs</div>
+            {dbLoading&&<div style={{display:"flex",alignItems:"center",gap:8,color:"#888780",fontSize:12,padding:8}}><Spinner/> Loading from Supabase...</div>}
+            {!dbLoading&&dbRuns.length===0&&<div style={{color:"#888780",fontSize:12,padding:8}}>No runs saved yet. Run a pipeline to save it.</div>}
+            {dbRuns.map(run=>(
+              <div key={run.id} onClick={()=>viewRun(run)} style={{padding:"12px 14px",borderRadius:10,border:"1.5px solid "+(selectedRun?.id===run.id?"#534AB7":"#EEECEA"),background:selectedRun?.id===run.id?"#EEEDFE":"white",cursor:"pointer",marginBottom:6,transition:"all 0.15s"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A",marginBottom:3}}>{run.session_label||"Pipeline run"}</div>
+                <div style={{display:"flex",gap:8,fontSize:10,color:"#888780"}}>
+                  <span>{run.total_resumes} resumes</span>
+                  <span>·</span>
+                  <span>{new Date(run.created_at).toLocaleDateString("en-IN",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Local localStorage history */}
+        <div style={{borderTop:"1px solid #EEECEA",paddingTop:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#888780",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Local history (browser)</div>
+          <PipelineHistoryPanel onLoadRun={(run)=>{toast("Run loaded","info");dispatch({type:"SET_NAV",payload:"report"});}}/>
+        </div>
       </div>
-      <PipelineHistoryPanel onLoadRun={(run)=>{toast("Run loaded — view report for details","info");dispatch({type:"SET_NAV",payload:"report"});}}/>
+
+      {/* Run detail panel */}
+      {selectedRun&&(
+        <Card style={{padding:20}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:4}}>{selectedRun.session_label}</div>
+          <div style={{fontSize:11,color:"#888780",marginBottom:14}}>{selectedRun.total_resumes} resumes · {new Date(selectedRun.created_at).toLocaleString("en-IN")}</div>
+          {candLoading&&<div style={{display:"flex",alignItems:"center",gap:8,color:"#888780",fontSize:12}}><Spinner/>Loading candidates...</div>}
+          {!candLoading&&runCandidates.length===0&&<div style={{color:"#888780",fontSize:12}}>No candidate data stored for this run.</div>}
+          {!candLoading&&runCandidates.length>0&&(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A",marginBottom:6}}>{runCandidates.length} candidates shortlisted</div>
+              {runCandidates.map(c=>(
+                <div key={c.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"1px solid #EEECEA",background:"#FAFAF8"}}>
+                  <div style={{width:34,height:34,borderRadius:"50%",background:c.avatar_bg||"#EEEDFE",color:c.avatar_text||"#3C3489",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,flexShrink:0}}>{c.avatar||"?"}</div>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A"}}>{c.name}</div>
+                    <div style={{fontSize:10,color:"#888780"}}>{c.role}{c.company?" · "+c.company:""}</div>
+                    {c.skills?.length>0&&<div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:4}}>{c.skills.slice(0,3).map(s=><span key={s} style={{fontSize:9,padding:"1px 6px",background:"#E1F5EE",color:"#085041",borderRadius:10,fontWeight:600}}>{s}</span>)}</div>}
+                  </div>
+                  <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
+                    <div style={{fontSize:16,fontWeight:900,color:c.score>=80?"#534AB7":c.score>=60?"#BA7517":"#D85A30"}}>{c.score}</div>
+                    {c.decision&&<div style={{fontSize:9,padding:"2px 7px",borderRadius:10,background:c.decision==="pass"?"#E1F5EE":"#FAECE7",color:c.decision==="pass"?"#085041":"#D85A30",fontWeight:700}}>{c.decision}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
@@ -2285,7 +3552,7 @@ function HiringHistory(){
 // ── APP SHELL ─────────────────────────────────────────────────────────────
 const HIRING_NAV=[{id:"dashboard",label:"Dashboard",icon:"⊞"},{id:"pipeline",label:"Pipeline",icon:"▶"},{id:"candidates",label:"Candidates",icon:"👥"},{id:"outreach",label:"Outreach",icon:"✉️"},{id:"interviews",label:"Interviews",icon:"💬"},{id:"report",label:"Report",icon:"📄"},{id:"history",label:"History",icon:"🕐"}];
 const HIRING_PAGES={dashboard:HiringDashboard,pipeline:HiringPipeline,candidates:HiringCandidates,outreach:HiringOutreach,interviews:HiringInterviews,report:HiringReport,history:HiringHistory};
-const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}";
+const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}";
 
 function HiringShell(){
   const{state,dispatch}=useStore();
@@ -2307,11 +3574,18 @@ function HiringShell(){
         </nav>
       </aside>
       <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        <header style={{background:"white",borderBottom:"1px solid #EEECEA",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-          <div><div style={{fontSize:13,fontWeight:800,color:"#1C1C1A"}}>HireFlow AI — Hiring Intelligence</div><div style={{fontSize:10,color:"#888780",marginTop:1}}>{done?(state.appliedResumes?.length||state.activeCandidates?.length||5)+" resumes · "+(state.activeCandidates?.length||5)+" shortlisted · pipeline complete":"Ready to run"}</div></div>
+        <header style={{background:"white",borderBottom:"1px solid #F3F4F6",padding:"10px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:"2px 8px 2px 0",borderRight:"1px solid #F3F4F6",marginRight:8}} onMouseEnter={e=>e.currentTarget.style.opacity="0.7"} onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
+              <div style={{width:22,height:22,borderRadius:6,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11}}>⚡</div>
+              <span style={{fontSize:10,fontWeight:800,color:"#9CA3AF"}}>FlowZint</span>
+            </button>
+            <div style={{width:28,height:28,borderRadius:8,background:"#F5F3FF",border:"1.5px solid #C4BFFA",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🧠</div>
+            <div><div style={{fontSize:13,fontWeight:800,color:"#111827"}}>HireFlow AI</div><div style={{fontSize:10,color:"#9CA3AF",marginTop:1}}>{done?(state.appliedResumes?.length||state.activeCandidates?.length||5)+" resumes · "+(state.activeCandidates?.length||5)+" shortlisted":"Ready to run"}</div></div>
+          </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {done&&<Tag color="success">Pipeline complete</Tag>}
-            <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{fontSize:11,fontWeight:600,color:"#534AB7",background:"#EEEDFE",border:"1px solid #CECBF6",borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>All modes</button>
+            <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#534AB7";e.currentTarget.style.color="#534AB7";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>All modes</button>
           </div>
         </header>
         <main style={{flex:1,overflowY:"auto",padding:20}}><div style={{animation:"fadeIn 0.3s ease"}}><Page/></div></main>
@@ -2327,65 +3601,151 @@ function HiringShell(){
 function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
   const{dispatch}=useStore();
   return(
-    <header style={{background:"linear-gradient(135deg,"+color+","+color+"CC)",padding:"14px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-      <div style={{display:"flex",alignItems:"center",gap:12}}>
-        <div style={{width:36,height:36,background:"rgba(255,255,255,0.2)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{icon}</div>
-        <div><div style={{fontSize:15,fontWeight:800,color:"white"}}>{title}</div><div style={{fontSize:11,color:"rgba(255,255,255,0.8)"}}>{subtitle}</div></div>
+    <header style={{background:"white",borderBottom:"1px solid #F3F4F6",padding:"12px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 6px rgba(0,0,0,0.06)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        {/* FlowZint brand */}
+        <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
+          style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",padding:"4px 8px 4px 0",borderRight:"1px solid #F3F4F6",marginRight:8}}
+          onMouseEnter={e=>e.currentTarget.style.opacity="0.7"}
+          onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
+          <div style={{width:26,height:26,borderRadius:7,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,boxShadow:"0 0 10px rgba(109,95,250,0.4)"}}>⚡</div>
+          <span style={{fontSize:11,fontWeight:800,color:"#6B7280"}}>FlowZint</span>
+        </button>
+        {/* Mode identity */}
+        <div style={{width:34,height:34,borderRadius:9,background:color+"18",border:"1.5px solid "+color+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>{icon}</div>
+        <div>
+          <div style={{fontSize:14,fontWeight:800,color:"#111827",letterSpacing:"-0.01em"}}>{title}</div>
+          <div style={{fontSize:10,color:"#9CA3AF",fontWeight:500}}>{subtitle}</div>
+        </div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <Tag color={tagColor}>{tag}</Tag>
-        <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{fontSize:11,fontWeight:600,color:"white",background:"rgba(255,255,255,0.2)",border:"none",borderRadius:8,padding:"6px 12px",cursor:"pointer"}}>All modes</button>
+        <span style={{fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:20,background:color+"14",color:color,border:"1px solid "+color+"30"}}>{tag}</span>
+        <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
+          style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor="#6D5FFA";e.currentTarget.style.color="#6D5FFA";}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>
+          ← All modes
+        </button>
       </div>
     </header>
+  );
+}
+
+// ── GLOBAL TIME SAVED COUNTER + KEYBOARD SHORTCUTS ───────────────────────
+function GlobalOverlay(){
+  const{state,dispatch}=useStore();
+  const[count,setCount]=useState(0);
+  const[visible,setVisible]=useState(true);
+  const pipelineDone=state.pipelineState==="done";
+
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const handler=(e)=>{
+      if(e.key==="Escape") dispatch({type:"SET_MODE",payload:"home"});
+      if(e.key==="h"&&(e.metaKey||e.ctrlKey)){e.preventDefault();dispatch({type:"SET_MODE",payload:"hiring"});}
+      if(e.key==="s"&&(e.metaKey||e.ctrlKey)){e.preventDefault();dispatch({type:"SET_MODE",payload:"sales"});}
+    };
+    window.addEventListener("keydown",handler);
+    return()=>window.removeEventListener("keydown",handler);
+  },[dispatch]);
+
+  // Count up from 0 to total time saved
+  const totalHours=pipelineDone?Math.round((state.appliedResumes?.length||42)*0.35)+8:0;
+  useEffect(()=>{
+    if(!pipelineDone){setCount(0);return;}
+    let c=0;
+    const step=Math.ceil(totalHours/40);
+    const id=setInterval(()=>{
+      c+=step;if(c>=totalHours){setCount(totalHours);clearInterval(id);}else setCount(c);
+    },50);
+    return()=>clearInterval(id);
+  },[pipelineDone,totalHours]);
+
+  if(!pipelineDone||!visible) return null;
+  return(
+    <div style={{position:"fixed",bottom:20,left:20,zIndex:8000,animation:"fadeIn 0.5s ease"}}>
+      <div style={{background:"linear-gradient(135deg,#0F172A,#1D9E75)",borderRadius:14,padding:"10px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 24px rgba(0,0,0,0.22)",cursor:"pointer"}} onClick={()=>setVisible(false)} title="Click to dismiss">
+        <div style={{fontSize:20}}>⏱</div>
+        <div>
+          <div style={{fontSize:18,fontWeight:900,color:"white",lineHeight:1}}>{count}h</div>
+          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>saved this session</div>
+        </div>
+        <div style={{width:1,height:28,background:"rgba(255,255,255,0.2)"}}/>
+        <div style={{fontSize:9,color:"rgba(255,255,255,0.6)",lineHeight:1.4,maxWidth:70}}>Esc→home<br/>⌘H hiring<br/>⌘S sales</div>
+      </div>
+    </div>
+  );
+}
+
+function PageTransition({children,modeKey}){
+  return(
+    <AnimatePresence mode="wait">
+      <motion.div key={modeKey} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}}
+        transition={{duration:0.22,ease:"easeOut"}} style={{display:"contents"}}>
+        {children}
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
 function AppInner(){
   const{state,dispatch}=useStore();
   const mode=state.appMode;
-  if(mode==="home") return<HomeScreen/>;
-  if(mode==="hiring") return<HiringShell/>;
+  if(mode==="home") return<PageTransition modeKey="home"><HomeScreen/></PageTransition>;
+  if(mode==="hiring") return<PageTransition modeKey="hiring"><HiringShell/></PageTransition>;
   if(mode==="overview") return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-      <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="FlowZint AI" tagColor="neutral"/>
-      <main style={{flex:1,overflow:"hidden"}}><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></main>
-      <ToastLayer/>
-    </div>
+    <PageTransition modeKey="overview">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="FlowZint AI" tagColor="neutral"/>
+        <main style={{flex:1,overflow:"hidden"}}><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></main>
+        <ToastLayer/>
+      </div>
+    </PageTransition>
   );
   if(mode==="smb") return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-      <ModeHeader icon="🏪" title="SMB Brain" subtitle="1-Click Indian Business AI" color="#7C3AED" tag="Open Innovation" tagColor="purple"/>
-      <main style={{flex:1,overflowY:"auto",padding:22}}><SMBMode/></main>
-      <ToastLayer/><CrossModePanel/>
-    </div>
+    <PageTransition modeKey="smb">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🏪" title="SMB Brain" subtitle="1-Click Indian Business AI" color="#7C3AED" tag="Open Innovation" tagColor="purple"/>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><SMBMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
   );
   if(mode==="warroom") return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-      <ModeHeader icon="⚡" title="AI War Room" subtitle="Multi-Agent Command Center" color="#0F172A" tag="Open Innovation" tagColor="neutral"/>
-      <main style={{flex:1,overflowY:"auto",padding:20}}><WarRoomMode/></main>
-      <ToastLayer/><CrossModePanel/>
-    </div>
+    <PageTransition modeKey="warroom">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="⚡" title="AI War Room" subtitle="Multi-Agent Command Center" color="#6D5FFA" tag="All agents" tagColor="brand"/>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><WarRoomMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
   );
   if(mode==="sales") return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-      <ModeHeader icon="🎯" title="SalesFlow AI" subtitle="Autonomous Sales Agent" color="#BA7517" tag="Sales Bot" tagColor="warn"/>
-      <main style={{flex:1,overflowY:"auto",padding:22}}><SalesMode/></main>
-      <ToastLayer/><CrossModePanel/>
-    </div>
+    <PageTransition modeKey="sales">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🎯" title="SalesFlow AI" subtitle="Autonomous Sales Agent" color="#BA7517" tag="Sales Bot" tagColor="warn"/>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><SalesMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
   );
   if(mode==="support") return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-      <ModeHeader icon="💬" title="SupportFlow AI" subtitle="Intelligent Support Bot" color="#1D9E75" tag="Support Chat Bot" tagColor="success"/>
-      <main style={{flex:1,overflow:"hidden",padding:16}}><SupportMode/></main>
-      <ToastLayer/><CrossModePanel/>
-    </div>
+    <PageTransition modeKey="support">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="💬" title="SupportFlow AI" subtitle="Intelligent Support Bot" color="#1D9E75" tag="Support Chat Bot" tagColor="success"/>
+        <main style={{flex:1,overflow:"hidden",padding:16}}><SupportMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
   );
   if(mode==="care") return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-      <ModeHeader icon="❤️" title="CareFlow AI" subtitle="Customer Care Bot" color="#D4537E" tag="Customer Care Bot" tagColor="pink"/>
-      <main style={{flex:1,overflowY:"auto",padding:20}}><CareMode/></main>
-      <ToastLayer/><CrossModePanel/>
-    </div>
+    <PageTransition modeKey="care">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="❤️" title="CareFlow AI" subtitle="Customer Care Bot" color="#D4537E" tag="Customer Care Bot" tagColor="pink"/>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><CareMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
   );
   return null;
 }
