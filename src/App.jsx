@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useState, useEffect, useRef, useCallback } from "react";
+import { createContext, useContext, useReducer, useState, useEffect, useRef, useCallback, Component } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CANDIDATE_POOL, SAMPLE_INTERVIEW_QUESTIONS, detectDomain, getCandidatesForDomain } from "./SampleData.js";
 import { RESUME_BANK, getResumesByDomain } from "./ResumeBank.js";
@@ -114,6 +114,7 @@ function reducer(s,a){
 
 const Ctx=createContext(null);
 function useStore(){return useContext(Ctx);}
+function useUserId(){const{session}=useStore();return session?.user?.id||null;}
 function useToast(){const{dispatch}=useStore();return(msg,type="success")=>dispatch({type:"ADD_TOAST",payload:{msg,type}});}
 
 // ── VOICE INPUT ────────────────────────────────────────────────────────────
@@ -180,6 +181,29 @@ function VoiceMicBtn({onResult,lang,style={}}){
       {interim&&<div style={{position:"absolute",top:"calc(100% + 6px)",left:0,right:0,background:"#1C1C1A",color:"white",fontSize:11,padding:"5px 10px",borderRadius:8,zIndex:100,opacity:0.85,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>🎙 {interim}</div>}
     </div>
   );
+}
+
+// ── ERROR BOUNDARY ────────────────────────────────────────────────────────
+class ErrorBoundary extends Component{
+  constructor(props){super(props);this.state={error:null};}
+  static getDerivedStateFromError(e){return{error:e};}
+  componentDidCatch(e,info){console.error("[ErrorBoundary]",e,info);}
+  render(){
+    if(this.state.error){
+      return(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100%",minHeight:320,padding:40,textAlign:"center"}}>
+          <div style={{fontSize:40,marginBottom:16}}>⚠️</div>
+          <div style={{fontSize:18,fontWeight:800,color:"#111827",marginBottom:8}}>Something went wrong</div>
+          <div style={{fontSize:13,color:"#6B7280",marginBottom:24,maxWidth:360}}>{this.state.error?.message||"An unexpected error occurred in this panel."}</div>
+          <button onClick={()=>this.setState({error:null})}
+            style={{padding:"10px 24px",background:"linear-gradient(135deg,#534AB7,#6D5FFA)",border:"none",borderRadius:10,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            Try Again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ── SUPABASE AUTH (pure fetch — no SDK) ──────────────────────────────────
@@ -1318,7 +1342,7 @@ function HiringDashboard(){
 }
 
 // ── REAL AI AGENT PIPELINE ────────────────────────────────────────────────
-async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
+async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[], userId=null){
   dispatch({type:"RESET_PIPELINE"});
   dispatch({type:"SET_PIPELINE",payload:"running"});
   toast("7 AI agents activated — analyzing your actual JD","info");
@@ -1537,6 +1561,7 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
     jdText,
     candidates:domainCandidates.map(c=>({...c,score:scoreMap[c.id]||c.baseScore||75})),
     totalResumes:appliedResumes.length||domainCandidates.length,
+    ...(userId&&{user_id:userId}),
   }).then(runId=>{
     if(runId) dispatch({type:"SET_DB_RUN_ID",payload:runId});
   });
@@ -1875,7 +1900,7 @@ function ResumeSubmitPanel(){
 }
 
 function HiringPipeline(){
-  const{state,dispatch}=useStore();const toast=useToast();
+  const{state,dispatch}=useStore();const toast=useToast();const userId=useUserId();
   const running=state.pipelineState==="running";
   const pDone=state.pipelineState==="done";
   const doneCount=Object.values(state.agentStatuses).filter(s=>s==="done").length;
@@ -1890,7 +1915,7 @@ function HiringPipeline(){
 
   const run=async()=>{
     if(!state.jdText.trim()){toast("Paste a job description first","error");return;}
-    await runRealAgentPipeline(state.jdText,dispatch,toast,state.appliedResumes);
+    await runRealAgentPipeline(state.jdText,dispatch,toast,state.appliedResumes,userId);
     dispatch({type:"OPEN_INTERVIEW_DECISION"});
   };
 
@@ -3019,7 +3044,7 @@ function DripSequencePanel({prospects,product,onEmpty}){
 
 function SalesMode(){
   const{state,dispatch}=useStore();
-  const toast=useToast();
+  const toast=useToast();const userId=useUserId();
   const[activeTab,setActiveTab]=useState("setup");
   const[objInput,setObjInput]=useState("");
   const[objReply,setObjReply]=useState("");
@@ -3063,7 +3088,7 @@ function SalesMode(){
       setGenPhase("");
       setActiveTab("prospects");
       // Save to Supabase
-      saveSalesSession({product:state.salesProduct,industry:state.salesTarget,prospects,emailDrafts:{}});
+      saveSalesSession({product:state.salesProduct,industry:state.salesTarget,prospects,emailDrafts:{},...(userId&&{user_id:userId})});
     }catch{
       const fallback=[
         {id:1,name:"Ankit Sharma",role:"VP Engineering",company:"GrowthTech",industry:"SaaS",painPoint:"Manual hiring taking 3+ weeks",fitScore:92,budget:"Rs 5-10L/yr",objection:"Already using spreadsheets",email:"ankit@growthtech.io"},
@@ -3262,7 +3287,7 @@ function SalesMode(){
 // ── SUPPORT MODE ──────────────────────────────────────────────────────────
 function SupportMode(){
   const{state,dispatch}=useStore();
-  const toast=useToast();
+  const toast=useToast();const userId=useUserId();
   const[chatInput,setChatInput]=useState("");
   const[chatLoading,setChatLoading]=useState(false);
   const[activeChatId,setActiveChatId]=useState(null);
@@ -3335,7 +3360,7 @@ function SupportMode(){
     dispatch({type:"UPDATE_SUPPORT_CHAT",id,updates:{messages:finalMsgs,sentiment,status:sentiment==="negative"?"escalated":"open",csat}});
     // Async save to Supabase (don't block UI)
     const updatedChats=[...state.supportChats.filter(c=>c.id!==id),{...state.supportChats.find(c=>c.id===id)||{id,timestamp:new Date().toLocaleTimeString()},messages:finalMsgs,sentiment,csat}];
-    saveSupportSession({docs:state.supportDocs,kb:state.supportKB,chats:updatedChats});
+    saveSupportSession({docs:state.supportDocs,kb:state.supportKB,chats:updatedChats,...(userId&&{user_id:userId})});
     setChatLoading(false);
   };
 
@@ -3442,7 +3467,7 @@ function SLATimer({priority,startTime}){
 
 function CareMode(){
   const{dispatch:globalDispatch}=useStore();
-  const toast=useToast();
+  const toast=useToast();const userId=useUserId();
   const[tickets,setTickets]=useState(SAMPLE_TICKETS.map(t=>({...t,createdAt:Date.now()-Math.random()*2*60*60*1000})));
   const[selected,setSelected]=useState(null);
   const[generating,setGenerating]=useState(null);
@@ -3625,7 +3650,7 @@ function CareMode(){
                   </button>}
                   <Btn variant="pink" fullWidth disabled={approved[selected.id]} onClick={()=>{
                     setApproved(a=>({...a,[selected.id]:true}));
-                    saveCareTicket({ticket:selected,toneUsed:tone,aiResponse:responses[selected.id],approved:true});
+                    saveCareTicket({ticket:selected,toneUsed:tone,aiResponse:responses[selected.id],approved:true,...(userId&&{user_id:userId})});
                     // ── UPSELL DETECTION: CareFlow → SalesFlow ─────────────
                     const msgLow=(selected.message||"").toLowerCase();
                     const hasUpsell=UPSELL_KEYWORDS.some(kw=>msgLow.includes(kw));
@@ -4967,13 +4992,13 @@ function PageTransition({children,modeKey}){
 function AppInner(){
   const{state,dispatch}=useStore();
   const mode=state.appMode;
-  if(mode==="home") return<PageTransition modeKey="home"><HomeScreen/></PageTransition>;
-  if(mode==="hiring") return<PageTransition modeKey="hiring"><HiringShell/></PageTransition>;
+  if(mode==="home") return<PageTransition modeKey="home"><ErrorBoundary><HomeScreen/></ErrorBoundary></PageTransition>;
+  if(mode==="hiring") return<PageTransition modeKey="hiring"><ErrorBoundary><HiringShell/></ErrorBoundary></PageTransition>;
   if(mode==="overview") return(
     <PageTransition modeKey="overview">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="FlowZint AI" tagColor="neutral"/>
-        <main style={{flex:1,overflow:"hidden"}}><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></main>
+        <main style={{flex:1,overflow:"hidden"}}><ErrorBoundary><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></ErrorBoundary></main>
         <ToastLayer/>
       </div>
     </PageTransition>
@@ -4982,7 +5007,7 @@ function AppInner(){
     <PageTransition modeKey="smb">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="🏪" title="SMB Brain" subtitle="1-Click Indian Business AI" color="#7C3AED" tag="Open Innovation" tagColor="purple"/>
-        <main style={{flex:1,overflowY:"auto",padding:22}}><SMBMode/></main>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><ErrorBoundary><SMBMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
@@ -4991,7 +5016,7 @@ function AppInner(){
     <PageTransition modeKey="warroom">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="⚡" title="AI War Room" subtitle="Multi-Agent Command Center" color="#6D5FFA" tag="All agents" tagColor="brand"/>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><WarRoomMode/></main>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><ErrorBoundary><WarRoomMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
@@ -5000,7 +5025,7 @@ function AppInner(){
     <PageTransition modeKey="sales">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="🎯" title="SalesFlow AI" subtitle="Autonomous Sales Agent" color="#BA7517" tag="Sales Bot" tagColor="warn"/>
-        <main style={{flex:1,overflowY:"auto",padding:22}}><SalesMode/></main>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><ErrorBoundary><SalesMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
@@ -5009,7 +5034,7 @@ function AppInner(){
     <PageTransition modeKey="support">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="💬" title="SupportFlow AI" subtitle="Intelligent Support Bot" color="#1D9E75" tag="Support Chat Bot" tagColor="success"/>
-        <main style={{flex:1,overflow:"hidden",padding:16}}><SupportMode/></main>
+        <main style={{flex:1,overflow:"hidden",padding:16}}><ErrorBoundary><SupportMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
@@ -5018,7 +5043,7 @@ function AppInner(){
     <PageTransition modeKey="care">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="❤️" title="CareFlow AI" subtitle="Customer Care Bot" color="#D4537E" tag="Customer Care Bot" tagColor="pink"/>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><CareMode/></main>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><ErrorBoundary><CareMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
