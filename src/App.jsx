@@ -243,6 +243,27 @@ async function callClaudeStream(messages,system="",onChunk){
   }catch{return"";}
 }
 
+// ── TEXT TO SPEECH ───────────────────────────────────────────────────────────
+let _ttsEnabled=false;
+function setTTSEnabled(v){_ttsEnabled=v;if(!v&&window.speechSynthesis)window.speechSynthesis.cancel();}
+function speak(text){
+  if(!_ttsEnabled||!window.speechSynthesis)return;
+  window.speechSynthesis.cancel();
+  const clean=text.replace(/[*_#`\[\]]/g,"").replace(/HANDOFF_TO_\w+:\s*.+/gi,"").replace(/⚡|🧠|🎯|💬|❤️|📋/g,"").trim().slice(0,300);
+  if(!clean)return;
+  const utt=new SpeechSynthesisUtterance(clean);
+  // Chrome loads voices async — retry once if empty
+  const trySpeak=()=>{
+    const voices=window.speechSynthesis.getVoices();
+    const v=voices.find(v=>v.lang==="en-IN")||voices.find(v=>v.lang.startsWith("en-"))||voices[0];
+    if(v)utt.voice=v;
+    utt.rate=1.08;utt.pitch=1.05;utt.volume=0.95;
+    window.speechSynthesis.speak(utt);
+  };
+  if(window.speechSynthesis.getVoices().length>0)trySpeak();
+  else window.speechSynthesis.onvoiceschanged=()=>{trySpeak();window.speechSynthesis.onvoiceschanged=null;};
+}
+
 // ── WHATSAPP SEND (CallMeBot) ─────────────────────────────────────────────
 // Set VITE_CALLMEBOT_PHONE and VITE_CALLMEBOT_APIKEY in Vercel env vars.
 // Setup: send "I allow callmebot to send me messages" to +34 644 59 97 91 on WhatsApp.
@@ -3695,6 +3716,22 @@ function WarRoomMode(){
   const[running,setRunning]=useState(false);
   const[phase,setPhase]=useState(0);
   const[debates,setDebates]=useState([]);
+  const[voiceEnabled,setVoiceEnabled]=useState(false);
+  const[lastRun,setLastRun]=useState(null);
+  useEffect(()=>{setTTSEnabled(voiceEnabled);},[voiceEnabled]);
+  useEffect(()=>{try{const s=localStorage.getItem("flowzint_last_warroom");if(s)setLastRun(JSON.parse(s));}catch{}},[]);
+  const exportPDF=()=>{
+    const summary=(phaseResults[6]||"").replace(/^📋\s*/,"");
+    const candidates=state.activeCandidates?.length||0;
+    const prospects=state.salesProspects?.length||0;
+    const kb=state.supportKB?.length||0;
+    const hours=((candidates*2.5)+(prospects*1.5)+(kb*0.5)).toFixed(0);
+    const roi=((candidates*2.5+prospects*1.5)*1200/100000).toFixed(1);
+    const win=window.open("","_blank");
+    win.document.write(`<!DOCTYPE html><html><head><title>FlowZint AI — War Room Report</title><style>body{font-family:Inter,sans-serif;max-width:700px;margin:40px auto;color:#111827;line-height:1.7}h1{font-size:24px;font-weight:900;color:#4C1D95}h2{font-size:15px;font-weight:800;color:#374151;margin-top:28px;border-bottom:2px solid #EDE9FE;padding-bottom:6px}.meta{color:#6B7280;font-size:13px;margin-bottom:24px}.summary{background:#F5F3FF;border:1.5px solid #A78BFA;border-radius:12px;padding:16px 20px;font-size:14px;color:#4C1D95;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.card{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:10px;padding:14px;text-align:center}.big{font-size:28px;font-weight:900;color:#6D5FFA}.label{font-size:12px;font-weight:700;color:#374151;margin-top:4px}.sub{font-size:11px;color:#9CA3AF}.handoff{border-left:3px solid #8B5CF6;padding:8px 14px;margin:6px 0;background:#FAFAFA;border-radius:0 8px 8px 0;font-size:13px}.dispute{border-left:3px solid #EF4444;padding:8px 14px;margin:6px 0;background:#FFF5F5;border-radius:0 8px 8px 0;font-size:13px}.resolve{border-left:3px solid #16A34A;padding:8px 14px;margin:6px 0;background:#F0FDF4;border-radius:0 8px 8px 0;font-size:13px}@media print{body{margin:0}}</style></head><body><h1>War Room Report</h1><div class="meta">Generated ${new Date().toLocaleString("en-IN")} · FlowZint AI</div>${summary?`<div class="summary">${summary}</div>`:""}<h2>Command Report</h2><div class="grid"><div class="card"><div class="big">${candidates||"—"}</div><div class="label">Candidates</div><div class="sub">HireFlow</div></div><div class="card"><div class="big">${prospects||"—"}</div><div class="label">Prospects</div><div class="sub">SalesFlow</div></div><div class="card"><div class="big">${kb||"—"}</div><div class="label">KB Items</div><div class="sub">SupportFlow</div></div></div><div class="grid"><div class="card"><div class="big">${hours}h</div><div class="label">Hours Saved</div><div class="sub">vs manual</div></div><div class="card"><div class="big">&#8377;${roi}L</div><div class="label">Monthly ROI</div><div class="sub">at &#8377;1200/hr</div></div><div class="card"><div class="big">${state.crossEvents?.length||0}</div><div class="label">Cross-agent Signals</div><div class="sub">this session</div></div></div><h2>Agent Handoffs & Debates</h2>${debates.map(d=>`<div class="${d.type==="dispute"?"dispute":d.type==="resolve"?"resolve":"handoff"}"><strong>${d.from} ${d.type==="dispute"?"⚔️":d.type==="resolve"?"✅":"→"} ${d.to}</strong><br>${d.msg}</div>`).join("")}<p style="margin-top:40px;color:#9CA3AF;font-size:12px">FlowZint AI · Powered by Llama 3.3 70B via Groq</p></body></html>`);
+    win.document.close();
+    setTimeout(()=>win.print(),400);
+  };
   const[metrics,setMetrics]=useState(null);
   const[phaseResults,setPhaseResults]=useState({});
 
@@ -3754,67 +3791,135 @@ function WarRoomMode(){
       (acc)=>{p0=acc;setPhaseResults(prev=>({...prev,0:"🤖 "+acc}));}
     );
 
+    // helper to add debate card
+    const addDebate=(from,to,type="handoff")=>{const id=Date.now()+Math.random();setDebates(prev=>[...prev,{from,to,msg:"",streaming:true,id,type}]);return id;};
+    const finishDebate=(id,msg)=>{setDebates(prev=>prev.map(d=>d.id===id?{...d,msg,streaming:false}:d));};
+
     // ── Phase 1: HireFlow runs first ────────────────────────────────────────
     setPhase(1);
     setPhaseResults(prev=>({...prev,1:"🧠 ..."}));
     toast("🧠 HireFlow agent activated","info");
+    speak("HireFlow agent online. Scanning candidates.");
     let p1="";
+    const d1id=addDebate("🧠 HireFlow","⚡ War Room");
     await callClaudeStream(
       [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD context"}\n\nReport your pipeline status in 2 sentences. Then output exactly: HANDOFF_TO_SALES: [name 1-2 candidates rejected due to budget/location mismatch who are warm leads for a software sales team, comma separated, or "none"]`}],
       "HireFlow agent. Data-driven. Reference actual candidate names and scores. 80 words max.",
-      (acc)=>{p1=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));}
+      (acc)=>{p1=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));setDebates(prev=>prev.map(d=>d.id===d1id?{...d,msg:acc}:d));}
     );
-    // Extract candidates handed to SalesFlow
+    finishDebate(d1id,p1);
+    speak(p1);
     const handoffMatch=p1.match(/HANDOFF_TO_SALES:\s*(.+)/i);
     const hireflowHandoff=handoffMatch?handoffMatch[1].replace(/\[|\]/g,"").trim():"";
-    if(hireflowHandoff&&hireflowHandoff!=="none"){
+    if(hireflowHandoff&&hireflowHandoff.toLowerCase()!=="none"){
       dispatch({type:"ADD_CROSS_EVENT",event:{type:"hiring_to_sales",title:"HireFlow → SalesFlow",desc:"Routed "+hireflowHandoff+" as warm sales leads",action:"Auto-routed"}});
     }
+    await new Promise(r=>setTimeout(r,300));
+
+    // ── DISAGREEMENT: SalesFlow challenges HireFlow ──────────────────────
+    toast("⚔️ SalesFlow disputes HireFlow assessment","warn");
+    const dis1id=addDebate("⚔️ SalesFlow","🧠 HireFlow","dispute");
+    let dispute1="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the SalesFlow AI agent. You just received HireFlow's report:\n"${p1.slice(0,200)}"\n\nYou DISAGREE with one specific hiring decision. Either a rejected candidate has a network/skills that would benefit a sales pipeline, or a hire creates a headcount risk that needs mitigation. Name the candidate specifically. State your counter-position in 2 direct sentences. No preamble, no agreement.`}],
+      "SalesFlow agent. Assertive disagreement. Name specific candidate. 50 words max.",
+      (acc)=>{dispute1=acc;setDebates(prev=>prev.map(d=>d.id===dis1id?{...d,msg:acc}:d));}
+    );
+    finishDebate(dis1id,dispute1);
+    speak("SalesFlow disputes: "+dispute1);
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"agent_disagreement",title:"⚔️ SalesFlow challenges HireFlow",desc:dispute1.slice(0,80),action:"Under review"}});
+    // HireFlow concedes or holds
+    const res1id=addDebate("🧠 HireFlow","⚔️ SalesFlow","resolve");
+    let resolve1="";
+    await callClaudeStream(
+      [{role:"user",content:`You are HireFlow AI. SalesFlow just challenged your decision:\n"${dispute1.slice(0,150)}"\n\nRespond in 1-2 sentences. Either concede and update your decision with a specific action (e.g. re-routing candidate X), OR counter with data. Be decisive, specific about what changes (or doesn't).`}],
+      "HireFlow agent. Decisive response. No preamble. 40 words max.",
+      (acc)=>{resolve1=acc;setDebates(prev=>prev.map(d=>d.id===res1id?{...d,msg:acc}:d));}
+    );
+    finishDebate(res1id,resolve1);
+    speak("HireFlow responds: "+resolve1);
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"agent_resolution",title:"✅ HireFlow resolves dispute",desc:resolve1.slice(0,80),action:"Decision updated"}});
     await new Promise(r=>setTimeout(r,300));
 
     // ── Phase 2: SalesFlow reads HireFlow's output ───────────────────────
     setPhase(2);
     setPhaseResults(prev=>({...prev,2:"🎯 ..."}));
     toast("🎯 SalesFlow agent activated — reading HireFlow handoff","info");
+    speak("SalesFlow agent online. Processing HireFlow handoff.");
     let p2="";
+    const d2id=addDebate("🎯 SalesFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from HireFlow: "${hireflowHandoff||"no candidates handed off this run"}" — these are rejected candidates who are warm leads. Acknowledge them and add to your pipeline.\n\nYour prospect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint}):"No prospects generated yet"}\n\nReport in 2 sentences: what you received from HireFlow, your top prospect, and next action. Then output exactly: HANDOFF_TO_SUPPORT: [the single most common objection you're hearing from prospects, e.g. "pricing too high" or "needs board approval"]`}],
-      "SalesFlow agent. Explicitly reference what HireFlow handed you. 80 words max.",
-      (acc)=>{p2=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));}
+      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from HireFlow: "${hireflowHandoff||"no candidates handed off"}" — these are rejected candidates who are warm leads. Acknowledge them.\n\nResolution from debate: "${resolve1.slice(0,100)}"\n\nYour prospect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint}):"No prospects yet"}\n\nReport in 2 sentences: what you accepted from HireFlow, your top prospect, and next action. Then output exactly: HANDOFF_TO_SUPPORT: [the top objection from prospects, e.g. "pricing too high"]`}],
+      "SalesFlow agent. Reference HireFlow handoff explicitly. 80 words max.",
+      (acc)=>{p2=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));setDebates(prev=>prev.map(d=>d.id===d2id?{...d,msg:acc}:d));}
     );
+    finishDebate(d2id,p2);
+    speak(p2);
     const objMatch=p2.match(/HANDOFF_TO_SUPPORT:\s*(.+)/i);
     const salesHandoff=objMatch?objMatch[1].replace(/\[|\]/g,"").trim():"pricing concerns";
-    dispatch({type:"ADD_CROSS_EVENT",event:{type:"sales_to_support",title:"SalesFlow → SupportFlow",desc:"Top objection flagged: "+salesHandoff,action:"Added to KB"}});
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"sales_to_support",title:"SalesFlow → SupportFlow",desc:"Top objection: "+salesHandoff,action:"Added to KB"}});
     await new Promise(r=>setTimeout(r,300));
 
-    // ── Phase 3: SupportFlow reads SalesFlow's objection ────────────────
+    // ── DISAGREEMENT: SupportFlow challenges SalesFlow framing ──────────
+    toast("⚔️ SupportFlow disputes SalesFlow objection framing","warn");
+    const dis2id=addDebate("⚔️ SupportFlow","🎯 SalesFlow","dispute");
+    let dispute2="";
+    await callClaudeStream(
+      [{role:"user",content:`You are SupportFlow AI. SalesFlow sent you this objection to add to your KB:\n"${salesHandoff}"\n\nYou DISAGREE with how it's framed — either it's too aggressive for a support context, missing nuance, or contradicts existing KB content. State in 1-2 sentences what's wrong and what the corrected framing should be.`}],
+      "SupportFlow agent. Push back on framing. Be specific. 45 words max.",
+      (acc)=>{dispute2=acc;setDebates(prev=>prev.map(d=>d.id===dis2id?{...d,msg:acc}:d));}
+    );
+    finishDebate(dis2id,dispute2);
+    speak("SupportFlow pushes back: "+dispute2);
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"agent_disagreement",title:"⚔️ SupportFlow challenges SalesFlow",desc:dispute2.slice(0,80),action:"KB reframing"}});
+    const res2id=addDebate("🎯 SalesFlow","⚔️ SupportFlow","resolve");
+    let resolve2="";
+    await callClaudeStream(
+      [{role:"user",content:`You are SalesFlow AI. SupportFlow reframed your objection:\n"${dispute2.slice(0,120)}"\n\nAccept the correction in 1 sentence and specify the updated KB entry that will be added.`}],
+      "SalesFlow agent. Accept gracefully. Confirm updated KB entry. 35 words max.",
+      (acc)=>{resolve2=acc;setDebates(prev=>prev.map(d=>d.id===res2id?{...d,msg:acc}:d));}
+    );
+    finishDebate(res2id,resolve2);
+    speak("SalesFlow concedes: "+resolve2);
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"agent_resolution",title:"✅ SalesFlow accepts reframe",desc:resolve2.slice(0,80),action:"KB updated"}});
+    await new Promise(r=>setTimeout(r,300));
+
+    // ── Phase 3: SupportFlow runs ────────────────────────────────────────
     setPhase(3);
     setPhaseResults(prev=>({...prev,3:"💬 ..."}));
-    toast("💬 SupportFlow activated — ingesting SalesFlow objection data","info");
+    toast("💬 SupportFlow activated — ingesting updated objection","info");
+    speak("SupportFlow agent online. Updating knowledge base.");
     let p3="";
+    const d3id=addDebate("💬 SupportFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from SalesFlow: Top prospect objection is "${salesHandoff}". Add this as a pre-emptive FAQ entry in your KB so support agents can handle it proactively.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Existing sample: "+state.supportKB[0]?.q:"No KB built yet"}\n\nReport in 2 sentences: what SalesFlow sent you, how you've updated the KB, and one escalation pattern. Then output exactly: HANDOFF_TO_CARE: [describe one high-priority customer interaction needing CareFlow attention, e.g. "Priya Nair — pipeline stuck 3 days, frustration escalating"]`}],
-      "SupportFlow agent. Explicitly reference what SalesFlow handed you. 80 words max.",
-      (acc)=>{p3=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));}
+      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\n⚡ INCOMING: SalesFlow objection (reframed after debate): "${resolve2.slice(0,100)||salesHandoff}". Added to KB.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample: "+state.supportKB[0]?.q:"No KB built yet"}\n\nReport in 2 sentences: what you added to KB, escalation patterns detected. Then output exactly: HANDOFF_TO_CARE: [describe one high-priority customer needing CareFlow attention]`}],
+      "SupportFlow agent. Confirm KB update. Reference debate resolution. 80 words max.",
+      (acc)=>{p3=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));setDebates(prev=>prev.map(d=>d.id===d3id?{...d,msg:acc}:d));}
     );
+    finishDebate(d3id,p3);
+    speak(p3);
     const escalMatch=p3.match(/HANDOFF_TO_CARE:\s*(.+)/i);
-    const supportHandoff=escalMatch?escalMatch[1].replace(/\[|\]/g,"").trim():"high-priority escalation from support chat";
+    const supportHandoff=escalMatch?escalMatch[1].replace(/\[|\]/g,"").trim():"high-priority escalation";
     dispatch({type:"ADD_CROSS_EVENT",event:{type:"support_to_care",title:"SupportFlow → CareFlow",desc:"Escalated: "+supportHandoff,action:"Priority ticket created"}});
     await new Promise(r=>setTimeout(r,300));
 
     // ── Phase 4: CareFlow reads SupportFlow's escalation ────────────────
     setPhase(4);
     setPhaseResults(prev=>({...prev,4:"❤️ ..."}));
-    toast("❤️ CareFlow activated — processing escalation from SupportFlow","info");
+    toast("❤️ CareFlow activated — processing escalation","info");
+    speak("CareFlow agent online. Processing escalation from SupportFlow.");
     let p4="";
+    const d4id=addDebate("❤️ CareFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from SupportFlow: Escalated case — "${supportHandoff}". Set this to URGENT priority immediately.\n\nExisting ticket queue: Raj Patel (billing, urgent), Priya Nair (tech issue, high), Amir Khan (enterprise upsell, normal), Sunita Rao (login, high), Vikram Singh (feedback, low).\n\nReport in 2 sentences: what SupportFlow escalated to you, your updated triage order, and the upsell detected. Then output exactly: HANDOFF_TO_SALES: [Amir Khan — enterprise upgrade, flag as priority upsell opportunity]`}],
-      "CareFlow agent. Explicitly reference what SupportFlow escalated. 80 words max.",
-      (acc)=>{p4=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));}
+      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from SupportFlow: "${supportHandoff}" — set URGENT priority.\n\nTicket queue: Raj Patel (billing, urgent), Priya Nair (tech, high), Amir Khan (enterprise upsell, normal), Sunita Rao (login, high), Vikram Singh (feedback, low).\n\nReport in 2 sentences: what SupportFlow escalated, your updated triage order, upsell detected. Then output exactly: HANDOFF_TO_SALES: [Amir Khan — enterprise upgrade, priority upsell]`}],
+      "CareFlow agent. Reference SupportFlow escalation explicitly. 80 words max.",
+      (acc)=>{p4=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));setDebates(prev=>prev.map(d=>d.id===d4id?{...d,msg:acc}:d));}
     );
+    finishDebate(d4id,p4);
+    speak(p4);
     const upsellMatch=p4.match(/HANDOFF_TO_SALES:\s*(.+)/i);
     if(upsellMatch){
-      dispatch({type:"ADD_CROSS_EVENT",event:{type:"care_to_sales",title:"CareFlow → SalesFlow",desc:"Upsell loop: "+upsellMatch[1].replace(/\[|\]/g,"").trim(),action:"Routed to SalesFlow pipeline"}});
+      dispatch({type:"ADD_CROSS_EVENT",event:{type:"care_to_sales",title:"CareFlow → SalesFlow",desc:"Upsell: "+upsellMatch[1].replace(/\[|\]/g,"").trim(),action:"Routed to SalesFlow"}});
     }
 
     // Phase 5: Cross-agent debates
@@ -3842,7 +3947,7 @@ function WarRoomMode(){
     setPhase(6);
     let p6="";
     await callClaudeStream(
-      [{role:"user",content:`You are the War Room AI generating the final unified intelligence report.\n\nWhat ran:\n- HireFlow: ${p1.slice(0,120)}\n- SalesFlow: ${p2.slice(0,120)}\n- SupportFlow: ${p3.slice(0,120)}\n- CareFlow: ${p4.slice(0,120)}\n\nWrite a 3-sentence executive summary: total outcomes, cross-agent handoffs made, and ROI estimate in hours saved and rupees.`}],
+      [{role:"user",content:`You are the War Room AI generating the final unified intelligence report.\n\n${lastRun?`MEMORY: Last run on ${lastRun.date} — ${lastRun.summary?.slice(0,120)}. Compare progress.\n\n`:""}\nWhat ran this session:\n- HireFlow: ${p1.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- SalesFlow: ${p2.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- SupportFlow: ${p3.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- CareFlow: ${p4.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- Debates: 2 disagreements raised and resolved between agents\n\nWrite a 3-sentence executive summary: outcomes, cross-agent debates resolved, ROI in hours saved and rupees. Be specific with numbers.`}],
       "War Room report AI. Authoritative. Specific numbers. 80 words max.",
       (acc)=>{p6=acc;setPhaseResults(prev=>({...prev,6:"📋 "+acc}));}
     );
@@ -3850,6 +3955,17 @@ function WarRoomMode(){
     setMetrics({done:true});
     setRunning(false);
     toast("War Room complete — unified report ready","success");
+    speak("War Room complete. "+p6.slice(0,200));
+    // Save session memory to localStorage
+    try{
+      localStorage.setItem("flowzint_last_warroom",JSON.stringify({
+        date:new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}),
+        summary:p6.replace(/^📋\s*/,""),
+        candidates:state.activeCandidates?.length||0,
+        prospects:state.salesProspects?.length||0,
+        crossEvents:state.crossEvents?.length||0,
+      }));
+    }catch{}
   };
 
   const done=phase===6&&!running&&metrics;
@@ -3869,18 +3985,42 @@ function WarRoomMode(){
           <div style={{marginLeft:"auto",fontSize:10,color:"#7C3AED",fontWeight:600}}>Debates will use your real data ↓</div>
         </div>
       )}
-      {/* Launch bar */}
-      <div style={{background:"white",border:"1.5px solid #F1F1F1",borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
-        <div>
-          <div style={{fontSize:14,fontWeight:800,color:"#111827"}}>Run all 6 AI systems simultaneously</div>
-          <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>HireFlow → SalesFlow → SupportFlow → CareFlow — each agent reads the previous agent's output before responding</div>
+      {/* Last run memory */}
+      {lastRun&&!running&&!metrics&&(
+        <div style={{marginBottom:12,padding:"10px 16px",background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:"1.5px solid #6EE7B7",borderRadius:10,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:16}}>🧠</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#065F46"}}>Memory: Last War Room run — {lastRun.date}</div>
+            <div style={{fontSize:11,color:"#047857",marginTop:1,lineHeight:1.5}}>{lastRun.summary?.slice(0,180)}...</div>
+          </div>
+          <button onClick={()=>setLastRun(null)} style={{fontSize:11,color:"#9CA3AF",background:"none",border:"none",cursor:"pointer"}}>✕</button>
         </div>
-        <button onClick={run} disabled={running}
-          style={{padding:"11px 24px",background:running?"#F3F4F6":"linear-gradient(135deg,#6D5FFA,#8B5CF6)",border:"none",borderRadius:10,fontSize:13,fontWeight:800,color:running?"#9CA3AF":"white",cursor:running?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:running?"none":"0 4px 18px rgba(109,95,250,0.35)",transition:"all 0.2s",whiteSpace:"nowrap",flexShrink:0}}
-          onMouseEnter={e=>{if(!running){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 6px 24px rgba(109,95,250,0.5)";}}}
-          onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=running?"none":"0 4px 18px rgba(109,95,250,0.35)";}}>
-          {running?<><Spinner color="#9CA3AF"/>Agents running...</>:"⚡ Activate all agents →"}
-        </button>
+      )}
+      {/* Launch bar */}
+      <div style={{background:"white",border:"1.5px solid #F1F1F1",borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:14,fontWeight:800,color:"#111827"}}>Run all 6 AI systems with real handoffs</div>
+          <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>HireFlow → SalesFlow → SupportFlow → CareFlow — agents read each other's output, debate, and resolve disagreements</div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
+          {/* Voice toggle */}
+          <button onClick={()=>setVoiceEnabled(v=>!v)}
+            title={voiceEnabled?"Voice ON — click to mute":"Voice OFF — click to enable AI narration"}
+            style={{padding:"9px 14px",background:voiceEnabled?"#EDE9FE":"#F3F4F6",border:`1.5px solid ${voiceEnabled?"#A78BFA":"#E5E7EB"}`,borderRadius:9,fontSize:13,fontWeight:700,color:voiceEnabled?"#6D28D9":"#6B7280",cursor:"pointer",transition:"all 0.2s",display:"flex",alignItems:"center",gap:6}}>
+            {voiceEnabled?"🔊 Voice ON":"🔇 Voice"}
+          </button>
+          {/* PDF export */}
+          {metrics&&<button onClick={exportPDF}
+            style={{padding:"9px 14px",background:"#F0FDF4",border:"1.5px solid #86EFAC",borderRadius:9,fontSize:13,fontWeight:700,color:"#15803D",cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+            📄 Export PDF
+          </button>}
+          <button onClick={run} disabled={running}
+            style={{padding:"11px 24px",background:running?"#F3F4F6":"linear-gradient(135deg,#6D5FFA,#8B5CF6)",border:"none",borderRadius:10,fontSize:13,fontWeight:800,color:running?"#9CA3AF":"white",cursor:running?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:running?"none":"0 4px 18px rgba(109,95,250,0.35)",transition:"all 0.2s",whiteSpace:"nowrap"}}
+            onMouseEnter={e=>{if(!running){e.currentTarget.style.transform="translateY(-1px)";e.currentTarget.style.boxShadow="0 6px 24px rgba(109,95,250,0.5)";}}}
+            onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=running?"none":"0 4px 18px rgba(109,95,250,0.35)";}}>
+            {running?<><Spinner color="#9CA3AF"/>Agents running...</>:"⚡ Activate all agents →"}
+          </button>
+        </div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:14,marginBottom:14}}>
@@ -3926,36 +4066,44 @@ function WarRoomMode(){
 
         {/* Live debates */}
         <Card style={{padding:16,display:"flex",flexDirection:"column"}}>
-          <div style={{fontSize:12,fontWeight:800,color:"#374151",marginBottom:12}}>Live agent handoffs</div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:800,color:"#374151"}}>Live agent debates & handoffs</div>
+            {debates.length>0&&<div style={{display:"flex",gap:6}}>
+              <span style={{fontSize:9,padding:"2px 8px",borderRadius:20,background:"#FEE2E2",color:"#DC2626",fontWeight:700}}>{debates.filter(d=>d.type==="dispute").length} disputes</span>
+              <span style={{fontSize:9,padding:"2px 8px",borderRadius:20,background:"#DCFCE7",color:"#16A34A",fontWeight:700}}>{debates.filter(d=>d.type==="resolve").length} resolved</span>
+            </div>}
+          </div>
           {debates.length===0&&(
             <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 0",color:"#D1D5DB",textAlign:"center"}}>
-              <div style={{fontSize:36,marginBottom:12,opacity:0.5}}>⚡</div>
-              <div style={{fontSize:13,fontWeight:600,color:"#9CA3AF"}}>Waiting for agents to activate</div>
-              <div style={{fontSize:11,color:"#D1D5DB",marginTop:4}}>Debates stream in real time once War Room runs</div>
+              <div style={{fontSize:36,marginBottom:12,opacity:0.5}}>⚔️</div>
+              <div style={{fontSize:13,fontWeight:600,color:"#9CA3AF"}}>Waiting for agents to debate</div>
+              <div style={{fontSize:11,color:"#D1D5DB",marginTop:4}}>Agents will disagree, argue, and resolve — all in real time</div>
             </div>
           )}
-          <div style={{display:"flex",flexDirection:"column",gap:10,overflowY:"auto",maxHeight:340}}>
+          <div style={{display:"flex",flexDirection:"column",gap:8,overflowY:"auto",maxHeight:420}}>
             {debates.map((d,i)=>{
-              const fromColor=agentColors[d.from]||"#6D5FFA";
-              const toColor=agentColors[d.to]||"#10B981";
+              const isDispute=d.type==="dispute";
+              const isResolve=d.type==="resolve";
+              const borderColor=isDispute?"#EF4444":isResolve?"#16A34A":"#8B5CF6";
+              const bg=isDispute?"#FFF5F5":isResolve?"#F0FDF4":"#FAFAFA";
+              const badge=isDispute?"⚔️ DISPUTE":isResolve?"✅ RESOLVED":"→ HANDOFF";
+              const badgeColor=isDispute?"#DC2626":isResolve?"#16A34A":"#7C3AED";
+              const badgeBg=isDispute?"#FEE2E2":isResolve?"#DCFCE7":"#EDE9FE";
               return(
-                <motion.div key={d.id||i} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}}
-                  style={{background:"#FAFAFA",border:"1.5px solid #F1F1F1",borderRadius:12,padding:"12px 14px",borderLeft:`3px solid ${fromColor}`}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:11,fontWeight:800,color:fromColor}}>{d.from}</span>
-                      <span style={{fontSize:12,color:"#D1D5DB"}}>→</span>
-                      <span style={{fontSize:11,fontWeight:800,color:toColor}}>{d.to}</span>
+                <motion.div key={d.id||i} initial={{opacity:0,y:10}} animate={{opacity:1,y:0}}
+                  style={{background:bg,border:`1px solid ${isDispute?"#FECACA":isResolve?"#86EFAC":"#F1F1F1"}`,borderRadius:10,padding:"10px 14px",borderLeft:`3px solid ${borderColor}`}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}>
+                    <div style={{display:"flex",alignItems:"center",gap:5,flexWrap:"wrap"}}>
+                      <span style={{fontSize:11,fontWeight:800,color:borderColor}}>{d.from}</span>
+                      <span style={{fontSize:10,color:"#D1D5DB"}}>→</span>
+                      <span style={{fontSize:11,fontWeight:700,color:"#6B7280"}}>{d.to}</span>
+                      <span style={{fontSize:9,fontWeight:800,padding:"1px 7px",borderRadius:20,background:badgeBg,color:badgeColor}}>{badge}</span>
                     </div>
-                    {d.streaming&&(
-                      <div style={{display:"flex",gap:3,alignItems:"center"}}>
-                        {[0,1,2].map(k=><div key={k} style={{width:4,height:4,borderRadius:"50%",background:fromColor,animation:"pulse 1s infinite",animationDelay:k*0.18+"s"}}/>)}
-                      </div>
-                    )}
+                    {d.streaming&&<div style={{display:"flex",gap:3}}>{[0,1,2].map(k=><div key={k} style={{width:4,height:4,borderRadius:"50%",background:borderColor,animation:"pulse 1s infinite",animationDelay:k*0.18+"s"}}/>)}</div>}
                   </div>
-                  <div style={{fontSize:12,color:"#4B5563",lineHeight:1.65}}>
-                    {d.msg||<span style={{color:"#D1D5DB",fontSize:11}}>Agent processing...</span>}
-                    {d.streaming&&d.msg&&<span style={{display:"inline-block",width:1.5,height:11,background:fromColor,marginLeft:1,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>}
+                  <div style={{fontSize:12,color:"#374151",lineHeight:1.65}}>
+                    {d.msg||<span style={{color:"#D1D5DB",fontSize:11}}>Processing...</span>}
+                    {d.streaming&&d.msg&&<span style={{display:"inline-block",width:1.5,height:11,background:borderColor,marginLeft:1,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>}
                   </div>
                 </motion.div>
               );
