@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useState, useEffect, useRef } from "react";
+import { createContext, useContext, useReducer, useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CANDIDATE_POOL, SAMPLE_INTERVIEW_QUESTIONS, detectDomain, getCandidatesForDomain } from "./SampleData.js";
 import { RESUME_BANK, getResumesByDomain } from "./ResumeBank.js";
@@ -182,6 +182,15 @@ function VoiceMicBtn({onResult,lang,style={}}){
   );
 }
 
+// ── GROQ KEY ROTATION (round-robin across up to 4 keys for load distribution) ──
+const _GROQ_KEYS=[
+  import.meta.env.VITE_GROQ_API_KEY,
+  import.meta.env.VITE_GROQ_API_KEY_2,
+  import.meta.env.VITE_GROQ_API_KEY_3,
+  import.meta.env.VITE_GROQ_API_KEY_4,
+].filter(Boolean);
+let _keyIdx=0;
+const getGroqKey=()=>{const k=_GROQ_KEYS[_keyIdx%_GROQ_KEYS.length];_keyIdx++;return k||"";};
 const GROQ_API_KEY=import.meta.env.VITE_GROQ_API_KEY||"";
 const GROQ_MODEL="llama-3.3-70b-versatile";
 let HINDI_MODE=false; // synced from React state by HindiSync component
@@ -194,7 +203,7 @@ async function callClaude(messages,system=""){
     const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
     const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+GROQ_API_KEY},
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+getGroqKey()},
       body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages})
     });
     const data=await res.json();
@@ -209,7 +218,7 @@ async function callClaudeStream(messages,system="",onChunk){
     const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
     const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
       method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+GROQ_API_KEY},
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+getGroqKey()},
       body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages,stream:true})
     });
     const reader=res.body.getReader();
@@ -3901,23 +3910,42 @@ function WarRoomMode(){
         </Card>
       </div>
 
+      {/* AI Executive Summary */}
+      {phaseResults[6]&&(
+        <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} style={{marginBottom:12}}>
+          <Card style={{padding:16,background:"linear-gradient(135deg,#F5F3FF,#EDE9FE)",border:"1.5px solid #A78BFA"}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#6D28D9",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8}}>📋 AI Executive Summary</div>
+            <div style={{fontSize:13,color:"#4C1D95",lineHeight:1.75}}>{phaseResults[6].replace(/^📋\s*/,"")}</div>
+          </Card>
+        </motion.div>
+      )}
+
       {/* Results */}
       {done&&(
         <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}}>
           <Card style={{padding:20}}>
             <div style={{fontSize:13,fontWeight:800,color:"#111827",marginBottom:14}}>Command report — all systems complete</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:12}}>
-              {[{icon:"🧠",label:"HireFlow",v:"Done",d:"5 shortlisted"},{icon:"🎯",label:"SalesFlow",v:"Done",d:"5 prospects"},{icon:"💬",label:"SupportFlow",v:"Done",d:"8 FAQ items"},{icon:"❤️",label:"CareFlow",v:"Done",d:"5 tickets resolved"}].map((m,i)=>(
+              {[
+                {icon:"🧠",label:"HireFlow",v:state.pipelineState==="done"?"Done":"—",d:state.activeCandidates?.length?state.activeCandidates.length+" shortlisted":"Run pipeline first"},
+                {icon:"🎯",label:"SalesFlow",v:state.salesProspects?.length>0?"Done":"—",d:state.salesProspects?.length>0?state.salesProspects.length+" prospects":"Run SalesFlow first"},
+                {icon:"💬",label:"SupportFlow",v:state.supportKB?.length>0?"Done":"—",d:state.supportKB?.length>0?state.supportKB.length+" KB items":"Run SupportFlow first"},
+                {icon:"❤️",label:"CareFlow",v:state.careTickets?.length>0?"Done":"—",d:state.careTickets?.length>0?state.careTickets.length+" tickets":"Run CareFlow first"},
+              ].map((m,i)=>(
                 <div key={i} style={{background:"#F9FAFB",borderRadius:12,padding:"14px 12px",textAlign:"center",border:"1px solid #F1F1F1"}}>
                   <div style={{fontSize:20,marginBottom:6}}>{m.icon}</div>
                   <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{m.label}</div>
-                  <div style={{fontSize:18,fontWeight:900,color:"#16A34A",margin:"4px 0"}}>{m.v}</div>
+                  <div style={{fontSize:18,fontWeight:900,color:m.v==="Done"?"#16A34A":"#9CA3AF",margin:"4px 0"}}>{m.v}</div>
                   <div style={{fontSize:10,color:"#9CA3AF"}}>{m.d}</div>
                 </div>
               ))}
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
-              {[{label:"Cross-agent handoffs",v:"5",d:"all automated"},{label:"Total hours saved",v:"42h",d:"vs manual ops"},{label:"Est. monthly ROI",v:"₹4.2L",d:"50-person team",c:"#6D5FFA"}].map((m,i)=>(
+              {[
+                {label:"Cross-agent handoffs",v:AGENT_PAIRS.length+"",d:"automated in this run"},
+                {label:"Total hours saved",v:((state.activeCandidates?.length||0)*2.5+(state.salesProspects?.length||0)*1.5+(state.supportKB?.length||0)*0.5).toFixed(0)+"h",d:"vs manual ops"},
+                {label:"Est. monthly ROI",v:"₹"+(((state.activeCandidates?.length||0)*2.5+(state.salesProspects?.length||0)*1.5)*1200/100000).toFixed(1)+"L",d:"at ₹1200/hr team cost",c:"#6D5FFA"},
+              ].map((m,i)=>(
                 <div key={i} style={{background:"#F9FAFB",borderRadius:12,padding:"16px",border:"1px solid #F1F1F1"}}>
                   <div style={{fontSize:22,fontWeight:900,color:m.c||"#111827",letterSpacing:"-0.02em"}}>{m.v}</div>
                   <div style={{fontSize:12,fontWeight:700,color:"#374151",marginTop:4}}>{m.label}</div>
@@ -4253,7 +4281,17 @@ function ApiKeyBanner(){
 
 function HindiSync(){
   const{state}=useStore();
-  useEffect(()=>{HINDI_MODE=state.hindiMode;},[state.hindiMode]);
+  const first=useRef(true);
+  useEffect(()=>{
+    HINDI_MODE=state.hindiMode;
+    if(first.current){first.current=false;return;}
+    // Show floating indicator when toggled
+    const el=document.createElement("div");
+    el.textContent=state.hindiMode?"🇮🇳 Hindi mode ON — AI will now respond in Hindi":"🌐 English mode — AI will respond in English";
+    Object.assign(el.style,{position:"fixed",bottom:"80px",left:"50%",transform:"translateX(-50%)",background:state.hindiMode?"#4C1D95":"#1C1C2E",color:"white",padding:"10px 20px",borderRadius:"24px",fontSize:"13px",fontWeight:"700",zIndex:"99999",boxShadow:"0 4px 20px rgba(0,0,0,0.3)",pointerEvents:"none"});
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(),2800);
+  },[state.hindiMode]);
   return null;
 }
 
