@@ -191,7 +191,7 @@ export function ProjectOverview({ onNavigate }) {
         <div onClick={() => setActive("intro")}
           style={{ padding: "14px 16px", cursor: "pointer", borderBottom: "1px solid #F3F4F6", background: active === "intro" ? "#EEF2FF" : "transparent", borderLeft: active === "intro" ? "3px solid #534AB7" : "3px solid transparent", transition: "all 0.15s" }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: active === "intro" ? "#534AB7" : "#374151" }}>⚡ Platform Overview</div>
-          <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>What is FlowZint AI?</div>
+          <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2 }}>What is NexFlow AI?</div>
         </div>
 
         <div style={{ padding: "10px 12px 4px", fontSize: 9, fontWeight: 800, color: "#9CA3AF", letterSpacing: "0.1em", textTransform: "uppercase" }}>AI SYSTEMS</div>
@@ -233,11 +233,11 @@ export function ProjectOverview({ onNavigate }) {
                     <span style={{ fontSize: 11, fontWeight: 700, color: "#534AB7" }}>Built for Indian businesses · Real AI · Real emails · Real database</span>
                   </div>
                   <h1 style={{ fontSize: 34, fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.15, marginBottom: 14 }}>
-                    FlowZint AI —<br />
+                    NexFlow AI —<br />
                     <span style={{ background: "linear-gradient(135deg,#534AB7,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>6 Agents. One Platform.</span>
                   </h1>
                   <p style={{ fontSize: 15, color: "#6B7280", lineHeight: 1.75, maxWidth: 600 }}>
-                    FlowZint AI runs 6 specialized AI agents — hiring, sales, support, customer care, SMB intelligence, and a War Room where all of them run simultaneously. Every response is real, powered by Llama 3.3 70B via Groq, with actual emails sent, actual data saved, and actual decisions made.
+                    NexFlow AI runs 6 specialized AI agents — hiring, sales, support, customer care, SMB intelligence, and a War Room where all of them run simultaneously. Every response is real, powered by Llama 3.3 70B via Groq, with actual emails sent, actual data saved, and actual decisions made.
                   </p>
                 </div>
 

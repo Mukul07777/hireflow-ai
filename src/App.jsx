@@ -388,9 +388,9 @@ async function sendWhatsAppReal(message){
 
 // ── SAMPLE DATA ───────────────────────────────────────────────────────────
 const SAMPLE_JD="Senior Frontend Engineer — Remote\n\nWe are a Bangalore-based B2B SaaS startup (Series A, 80 employees).\n\nRequirements:\n- 4+ years React + TypeScript\n- Next.js, GraphQL experience\n- System design fundamentals\n- Mentoring junior developers\n- Startup mindset\n\nCompensation: Rs 28-42 LPA + equity + fully remote";
-const SAMPLE_PRODUCT="FlowZint AI Platform\n\nAutonomous multi-agent AI for Indian SMBs. Automates hiring, sales, support, and care.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\nFree trial: 14 days, no credit card.";
+const SAMPLE_PRODUCT="NexFlow AI Platform\n\nAutonomous multi-agent AI for Indian SMBs. Automates hiring, sales, support, and care.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\nFree trial: 14 days, no credit card.";
 const SAMPLE_TARGET="B2B SaaS startups in India (Series A-B, 50-300 employees). CTOs struggling with scaling hiring and customer ops. Bangalore, Mumbai, Hyderabad, Delhi-NCR.";
-const SAMPLE_DOCS="FlowZint Help Center\n\nGetting Started: Sign up at flowzint.in, create workspace, choose template, paste context, run pipeline.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\n\nRefund Policy: 14-day money-back. Email support@flowzint.in.\n\nPipeline stuck: Hard refresh then restart. API errors: Settings > Integrations.\n\nData Privacy: AES-256 encryption. SOC2 Type II. Data stays in India.";
+const SAMPLE_DOCS="NexFlow Help Center\n\nGetting Started: Sign up at flowzint.in, create workspace, choose template, paste context, run pipeline.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\n\nRefund Policy: 14-day money-back. Email support@flowzint.in.\n\nPipeline stuck: Hard refresh then restart. API errors: Settings > Integrations.\n\nData Privacy: AES-256 encryption. SOC2 Type II. Data stays in India.";
 const SAMPLE_SMB={name:"Kirana King",type:"Retail Chain",city:"Pune",problem:"Managing 3 stores, WhatsApp orders chaotic, no CRM, losing customers to BigBasket",whatsappChats:"Hey bhai kal 10kg aata chahiye\nHi can I order ghee 2kg?\nKab milega mera order? 2 din ho gaye\nBhai price kya hai tomato ka aaj?\nOrder cancel karna hai mera"};
 
 const CANDIDATES=[
@@ -767,7 +767,7 @@ function HomeScreen(){
     dispatch({type:"SET_MODE",payload:"smb"});
     await step("🧠 Step 2: HireFlow — Sample JD & 5 candidates loaded. Pipeline ready.",1400);
     dispatch({type:"SET_MODE",payload:"hiring"});
-    await step("🎯 Step 3: SalesFlow — FlowZint AI product + Indian B2B target loaded.",1400);
+    await step("🎯 Step 3: SalesFlow — NexFlow AI product + Indian B2B target loaded.",1400);
     dispatch({type:"SET_MODE",payload:"sales"});
     await step("⚡ Step 4: War Room — All agents briefed. Click Activate to watch them debate!",1600);
     dispatch({type:"SET_MODE",payload:"warroom"});
@@ -805,7 +805,7 @@ function HomeScreen(){
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 0 20px rgba(109,95,250,0.5)"}}>⚡</div>
             <div>
-              <div style={{fontSize:15,fontWeight:900,color:"white",letterSpacing:"-0.01em"}}>FlowZint AI</div>
+              <div style={{fontSize:15,fontWeight:900,color:"white",letterSpacing:"-0.01em"}}>NexFlow AI</div>
               <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",fontWeight:500}}>Multi-Agent Platform</div>
             </div>
           </div>
@@ -999,7 +999,7 @@ function HomeScreen(){
         <div style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{width:22,height:22,borderRadius:6,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11}}>⚡</div>
-            <span style={{fontSize:11,color:"rgba(255,255,255,0.3)",fontWeight:500}}>FlowZint AI · Powered by Groq · Llama 3.3 70B</span>
+            <span style={{fontSize:11,color:"rgba(255,255,255,0.3)",fontWeight:500}}>NexFlow AI · Powered by Groq · Llama 3.3 70B</span>
           </div>
           <button onClick={()=>dispatch({type:"SET_MODE",payload:"overview"})}
             style={{fontSize:11,fontWeight:600,color:"rgba(255,255,255,0.4)",background:"none",border:"none",cursor:"pointer",padding:0,transition:"color 0.15s"}}
@@ -1138,9 +1138,9 @@ function ApprovalModal({candidate:c,onClose}){
       const skills=(c.skills||c.parsedSkills||[]).slice(0,3).join(", ");
       const resumeSnippet=c.text?c.text.slice(0,300):"";
       const jdSnippet=state.jdText?.slice(0,200)||"";
-      const p="Write a warm personalized recruiter outreach email.\n\nCandidate: "+c.name+"\nRole: "+role+(company?" at "+company:"")+"\nSkills: "+(skills||"not specified")+"\nResume: "+resumeSnippet+"\n\nJob we are hiring for: "+jdSnippet+"\n\nEmail rules:\n- Under 80 words\n- Reference ONE specific thing from their background\n- Never say 'Applied' as their company\n- Natural tone, not template\n- First line: Subject: [subject]\n- Sign as: Hiring Team, FlowZint";
+      const p="Write a warm personalized recruiter outreach email.\n\nCandidate: "+c.name+"\nRole: "+role+(company?" at "+company:"")+"\nSkills: "+(skills||"not specified")+"\nResume: "+resumeSnippet+"\n\nJob we are hiring for: "+jdSnippet+"\n\nEmail rules:\n- Under 80 words\n- Reference ONE specific thing from their background\n- Never say 'Applied' as their company\n- Natural tone, not template\n- First line: Subject: [subject]\n- Sign as: Hiring Team, NexFlow";
       callClaude([{role:"user",content:p}]).then(result=>{
-        const text=result||"Subject: Your profile stood out — FlowZint\n\nHi "+c.name.split(" ")[0]+",\n\nYour experience as a "+role+" caught our eye. We're hiring and think your background is a strong match.\n\nOpen to a quick 20-min call this week?\n\nBest,\nHiring Team, FlowZint";
+        const text=result||"Subject: Your profile stood out — NexFlow\n\nHi "+c.name.split(" ")[0]+",\n\nYour experience as a "+role+" caught our eye. We're hiring and think your background is a strong match.\n\nOpen to a quick 20-min call this week?\n\nBest,\nHiring Team, NexFlow";
         setDraft(text);
         dispatch({type:"SET_EMAIL_DRAFT",id:c.id,text});
         setGenerating(false);
@@ -1172,7 +1172,7 @@ function ApprovalModal({candidate:c,onClose}){
       to_email:sendTo,
       subject,
       message:body,
-      from_name:"Hiring Team, FlowZint"
+      from_name:"Hiring Team, NexFlow"
     });
 
     if(demoEmail.trim()) localStorage.setItem(DEMO_EMAIL_KEY,demoEmail.trim());
@@ -1554,14 +1554,14 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[], 
     dispatch({type:"ADD_WAR_ROOM_LOG",agentId:4,log:"Drafting email for "+c.name+" ("+c.company+")..."});
     let emailFull="";
     await callClaudeStream(
-      [{role:"user",content:"Write a warm personalized recruiter email to "+c.name+" ("+c.role+" at "+c.company+"). Their background: "+c.summary+". We are hiring for this role: "+jdText.slice(0,200)+". Under 100 words. Reference their specific work at "+c.company+". Include subject line. Sign as Hiring Team, FlowZint."}],
+      [{role:"user",content:"Write a warm personalized recruiter email to "+c.name+" ("+c.role+" at "+c.company+"). Their background: "+c.summary+". We are hiring for this role: "+jdText.slice(0,200)+". Under 100 words. Reference their specific work at "+c.company+". Include subject line. Sign as Hiring Team, NexFlow."}],
       "",
       (accumulated)=>{
         emailFull=accumulated;
         dispatch({type:"SET_AGENT_STREAM",id:4,text:"✍️ "+c.name.split(" ")[0]+": "+accumulated});
       }
     );
-    dispatch({type:"SET_EMAIL_DRAFT",id:c.id,text:emailFull||"Hi "+c.name.split(" ")[0]+",\n\nYour work at "+c.company+" stood out.\n\nWe're hiring and think you'd be a strong fit.\n\nOpen to a 20-min call?\n\nBest,\nHiring Team, FlowZint"});
+    dispatch({type:"SET_EMAIL_DRAFT",id:c.id,text:emailFull||"Hi "+c.name.split(" ")[0]+",\n\nYour work at "+c.company+" stood out.\n\nWe're hiring and think you'd be a strong fit.\n\nOpen to a 20-min call?\n\nBest,\nHiring Team, NexFlow"});
     dispatch({type:"ADD_WAR_ROOM_LOG",agentId:4,log:"✓ "+c.name+" email ready"});
   }
   dispatch({type:"SET_AGENT_STATUS",id:4,status:"done"});
@@ -1671,9 +1671,9 @@ function InterviewDecisionModal(){
         const calLink=makeCalendarLink(c.name,jobTitle);
 
         const body=mode==="manual"
-          ?"Hi "+c.name.split(" ")[0]+",\n\nWe were impressed with your profile and would love to schedule an interview for the "+jobTitle+" role.\n\nPlease use the link below to pick a time that works for you:\n\n📅 Schedule Interview: "+calLink+"\n\nThe slot is pre-set for 30 minutes. Feel free to reschedule if needed.\n\nLooking forward to connecting!\n\nBest regards,\nHiring Team, FlowZint"
-          :"Hi "+c.name.split(" ")[0]+",\n\nThank you for your interest in the "+jobTitle+" role. We would like to move forward with a structured interview.\n\nPlease answer the following questions and reply to this email:\n\n"+(questions||"Please share your availability for an interview.")+"\n\nBest regards,\nHiring Team, FlowZint";
-        await sendRealEmail({to_name:c.name,to_email:emailAddr,subject,message:body,from_name:"Hiring Team, FlowZint"});
+          ?"Hi "+c.name.split(" ")[0]+",\n\nWe were impressed with your profile and would love to schedule an interview for the "+jobTitle+" role.\n\nPlease use the link below to pick a time that works for you:\n\n📅 Schedule Interview: "+calLink+"\n\nThe slot is pre-set for 30 minutes. Feel free to reschedule if needed.\n\nLooking forward to connecting!\n\nBest regards,\nHiring Team, NexFlow"
+          :"Hi "+c.name.split(" ")[0]+",\n\nThank you for your interest in the "+jobTitle+" role. We would like to move forward with a structured interview.\n\nPlease answer the following questions and reply to this email:\n\n"+(questions||"Please share your availability for an interview.")+"\n\nBest regards,\nHiring Team, NexFlow";
+        await sendRealEmail({to_name:c.name,to_email:emailAddr,subject,message:body,from_name:"Hiring Team, NexFlow"});
       }
       dispatch({type:"SET_EMAIL_SENT",id:c.id});
       setSentTo(prev=>({...prev,[c.id]:true}));
@@ -3028,7 +3028,7 @@ function DripSequencePanel({prospects,product,onEmpty}){
     const seq=[];
     for(let i=0;i<3;i++){
       let full="";
-      await callClaudeStream([{role:"user",content:"Write email "+(i+1)+" of 3 in a B2B drip sequence.\n\nThis is the "+emails[i]+".\nProspect: "+p.name+", "+p.role+" at "+p.company+"\nPain: "+p.painPoint+"\nProduct: "+product.slice(0,200)+"\n\nFormat:\nSUBJECT: [subject line]\n\n[email body — under 80 words]\n\nSign as Sales Team, FlowZint.\nEmail "+(i+1)+"/3 should feel progressively more concise."}],"",(acc)=>{
+      await callClaudeStream([{role:"user",content:"Write email "+(i+1)+" of 3 in a B2B drip sequence.\n\nThis is the "+emails[i]+".\nProspect: "+p.name+", "+p.role+" at "+p.company+"\nPain: "+p.painPoint+"\nProduct: "+product.slice(0,200)+"\n\nFormat:\nSUBJECT: [subject line]\n\n[email body — under 80 words]\n\nSign as Sales Team, NexFlow.\nEmail "+(i+1)+"/3 should feel progressively more concise."}],"",(acc)=>{
         full=acc;
         setSequences(s=>{
           const prev=[...(s[p.id]||[{},{},{}])];
@@ -3124,13 +3124,13 @@ function SalesMode(){
       setGenPhase("writing");
       // Stream each email as it's written
       for(const pr of prospects){
-        const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm. Sign as Sales Team, FlowZint.";
+        const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm. Sign as Sales Team, NexFlow.";
         let emailText="";
         await callClaudeStream([{role:"user",content:ep}],"",(accumulated)=>{
           emailText=accumulated;
           dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:accumulated});
         });
-        if(!emailText) dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" faces "+pr.painPoint+".\n\nOur platform can help. Would you be open to a 15-min call?\n\nBest,\nSales Team, FlowZint"});
+        if(!emailText) dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" faces "+pr.painPoint+".\n\nOur platform can help. Would you be open to a 15-min call?\n\nBest,\nSales Team, NexFlow"});
       }
       toast("5 prospects with personalized outreach ready","success");
       setGenPhase("");
@@ -3146,7 +3146,7 @@ function SalesMode(){
         {id:5,name:"Karan Mehta",role:"CTO",company:"DevStudio",industry:"Agency",painPoint:"Inconsistent interviews",fitScore:71,budget:"Rs 3-6L/yr",objection:"Need integrations",email:"karan@devstudio.io"},
       ];
       dispatch({type:"SET_SALES_PROSPECTS",payload:fallback});
-      for(const pr of fallback)dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" might be dealing with "+pr.painPoint+".\n\nOur AI platform saves 14+ hours per hire. Would you be open to a 15-min demo?\n\nBest,\nSales Team, FlowZint"});
+      for(const pr of fallback)dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" might be dealing with "+pr.painPoint+".\n\nOur AI platform saves 14+ hours per hire. Would you be open to a 15-min demo?\n\nBest,\nSales Team, NexFlow"});
       toast("Prospects generated","success");
       setGenPhase("");
       setActiveTab("prospects");
@@ -3275,7 +3275,7 @@ function SalesMode(){
                   </button>}
                   {draft&&<button onClick={async(e)=>{
                     const btn=e.currentTarget;btn.disabled=true;btn.textContent="Sending...";
-                    const fullMsg="Hi "+p.name.split(" ")[0]+"! 👋\n\n"+draft.slice(0,400)+"...\n\n— FlowZint AI";
+                    const fullMsg="Hi "+p.name.split(" ")[0]+"! 👋\n\n"+draft.slice(0,400)+"...\n\n— NexFlow AI";
                     const sent=await sendWhatsAppReal(fullMsg);
                     if(sent){toast("📲 WhatsApp message sent to your phone!","success");}
                     else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Vercel for direct send","info");}
@@ -3541,13 +3541,13 @@ function CareMode(){
       direct:"Lead with the solution immediately. No preamble. Bullet points if needed. Under 100 words.",
       urgent:"This is urgent. Acknowledge immediately, give specific timeline, escalate if needed. Highest priority language.",
     }[tone];
-    const p="You are a customer care agent. Write a response in "+tone.toUpperCase()+" tone.\n\nTone instruction: "+toneInstructions+"\n\nCustomer: "+t.customer+" ("+t.company+", "+t.city+")\nSubject: "+t.subject+"\nMessage: "+t.message+"\nCategory: "+t.category+"\nSentiment score: "+t.sentiment+" ("+(t.sentiment<=-0.5?"Very negative":t.sentiment<0?"Frustrated":"Positive")+")\n\nRules:\n- Address their specific issue (not generic)\n- Give concrete next step\n- Sign as Customer Care Team, FlowZint";
+    const p="You are a customer care agent. Write a response in "+tone.toUpperCase()+" tone.\n\nTone instruction: "+toneInstructions+"\n\nCustomer: "+t.customer+" ("+t.company+", "+t.city+")\nSubject: "+t.subject+"\nMessage: "+t.message+"\nCategory: "+t.category+"\nSentiment score: "+t.sentiment+" ("+(t.sentiment<=-0.5?"Very negative":t.sentiment<0?"Frustrated":"Positive")+")\n\nRules:\n- Address their specific issue (not generic)\n- Give concrete next step\n- Sign as Customer Care Team, NexFlow";
     let full="";
     await callClaudeStream([{role:"user",content:p}],"",(accumulated)=>{
       full=accumulated;
       setResponses(r=>({...r,[t.id]:accumulated}));
     });
-    if(!full) setResponses(r=>({...r,[t.id]:"Dear "+t.customer.split(" ")[0]+",\n\nThank you for reaching out. I completely understand your concern and sincerely apologize for the inconvenience.\n\nI have escalated this to our "+t.category+" team and they will resolve it within 24 hours.\n\nThank you for your patience.\nCustomer Care Team, FlowZint"}));
+    if(!full) setResponses(r=>({...r,[t.id]:"Dear "+t.customer.split(" ")[0]+",\n\nThank you for reaching out. I completely understand your concern and sincerely apologize for the inconvenience.\n\nI have escalated this to our "+t.category+" team and they will resolve it within 24 hours.\n\nThank you for your patience.\nCustomer Care Team, NexFlow"}));
     setGenerating(null);
     toast("Response drafted for "+t.customer,"success");
   };
@@ -3688,7 +3688,7 @@ function CareMode(){
                   <Btn variant="secondary" onClick={()=>genResponse(selected)} disabled={generating===selected.id}>Regenerate</Btn>
                   {responses[selected.id]&&<button onClick={async(e)=>{
                     const btn=e.currentTarget;btn.disabled=true;btn.textContent="Sending...";
-                    const fullMsg="नमस्ते "+selected.customer.split(" ")[0]+"! 🙏\n\n"+responses[selected.id].slice(0,500)+"\n\n— "+selected.company+" Support via FlowZint AI";
+                    const fullMsg="नमस्ते "+selected.customer.split(" ")[0]+"! 🙏\n\n"+responses[selected.id].slice(0,500)+"\n\n— "+selected.company+" Support via NexFlow AI";
                     const sent=await sendWhatsAppReal(fullMsg);
                     if(sent){toast("📲 Response sent to your WhatsApp!","success");}
                     else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Vercel for direct send","info");}
@@ -4124,7 +4124,7 @@ function WarRoomMode(){
     const hours=((candidates*2.5)+(prospects*1.5)+(kb*0.5)).toFixed(0);
     const roi=((candidates*2.5+prospects*1.5)*1200/100000).toFixed(1);
     const win=window.open("","_blank");
-    win.document.write(`<!DOCTYPE html><html><head><title>FlowZint AI — War Room Report</title><style>body{font-family:Inter,sans-serif;max-width:700px;margin:40px auto;color:#111827;line-height:1.7}h1{font-size:24px;font-weight:900;color:#4C1D95}h2{font-size:15px;font-weight:800;color:#374151;margin-top:28px;border-bottom:2px solid #EDE9FE;padding-bottom:6px}.meta{color:#6B7280;font-size:13px;margin-bottom:24px}.summary{background:#F5F3FF;border:1.5px solid #A78BFA;border-radius:12px;padding:16px 20px;font-size:14px;color:#4C1D95;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.card{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:10px;padding:14px;text-align:center}.big{font-size:28px;font-weight:900;color:#6D5FFA}.label{font-size:12px;font-weight:700;color:#374151;margin-top:4px}.sub{font-size:11px;color:#9CA3AF}.handoff{border-left:3px solid #8B5CF6;padding:8px 14px;margin:6px 0;background:#FAFAFA;border-radius:0 8px 8px 0;font-size:13px}.dispute{border-left:3px solid #EF4444;padding:8px 14px;margin:6px 0;background:#FFF5F5;border-radius:0 8px 8px 0;font-size:13px}.resolve{border-left:3px solid #16A34A;padding:8px 14px;margin:6px 0;background:#F0FDF4;border-radius:0 8px 8px 0;font-size:13px}@media print{body{margin:0}}</style></head><body><h1>War Room Report</h1><div class="meta">Generated ${new Date().toLocaleString("en-IN")} · FlowZint AI</div>${summary?`<div class="summary">${summary}</div>`:""}<h2>Command Report</h2><div class="grid"><div class="card"><div class="big">${candidates||"—"}</div><div class="label">Candidates</div><div class="sub">HireFlow</div></div><div class="card"><div class="big">${prospects||"—"}</div><div class="label">Prospects</div><div class="sub">SalesFlow</div></div><div class="card"><div class="big">${kb||"—"}</div><div class="label">KB Items</div><div class="sub">SupportFlow</div></div></div><div class="grid"><div class="card"><div class="big">${hours}h</div><div class="label">Hours Saved</div><div class="sub">vs manual</div></div><div class="card"><div class="big">&#8377;${roi}L</div><div class="label">Monthly ROI</div><div class="sub">at &#8377;1200/hr</div></div><div class="card"><div class="big">${state.crossEvents?.length||0}</div><div class="label">Cross-agent Signals</div><div class="sub">this session</div></div></div><h2>Agent Handoffs & Debates</h2>${debates.map(d=>`<div class="${d.type==="dispute"?"dispute":d.type==="resolve"?"resolve":"handoff"}"><strong>${d.from} ${d.type==="dispute"?"⚔️":d.type==="resolve"?"✅":"→"} ${d.to}</strong><br>${d.msg}</div>`).join("")}<p style="margin-top:40px;color:#9CA3AF;font-size:12px">FlowZint AI · Powered by Llama 3.3 70B via Groq</p></body></html>`);
+    win.document.write(`<!DOCTYPE html><html><head><title>NexFlow AI — War Room Report</title><style>body{font-family:Inter,sans-serif;max-width:700px;margin:40px auto;color:#111827;line-height:1.7}h1{font-size:24px;font-weight:900;color:#4C1D95}h2{font-size:15px;font-weight:800;color:#374151;margin-top:28px;border-bottom:2px solid #EDE9FE;padding-bottom:6px}.meta{color:#6B7280;font-size:13px;margin-bottom:24px}.summary{background:#F5F3FF;border:1.5px solid #A78BFA;border-radius:12px;padding:16px 20px;font-size:14px;color:#4C1D95;margin-bottom:20px}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.card{background:#F9FAFB;border:1px solid #E5E7EB;border-radius:10px;padding:14px;text-align:center}.big{font-size:28px;font-weight:900;color:#6D5FFA}.label{font-size:12px;font-weight:700;color:#374151;margin-top:4px}.sub{font-size:11px;color:#9CA3AF}.handoff{border-left:3px solid #8B5CF6;padding:8px 14px;margin:6px 0;background:#FAFAFA;border-radius:0 8px 8px 0;font-size:13px}.dispute{border-left:3px solid #EF4444;padding:8px 14px;margin:6px 0;background:#FFF5F5;border-radius:0 8px 8px 0;font-size:13px}.resolve{border-left:3px solid #16A34A;padding:8px 14px;margin:6px 0;background:#F0FDF4;border-radius:0 8px 8px 0;font-size:13px}@media print{body{margin:0}}</style></head><body><h1>War Room Report</h1><div class="meta">Generated ${new Date().toLocaleString("en-IN")} · NexFlow AI</div>${summary?`<div class="summary">${summary}</div>`:""}<h2>Command Report</h2><div class="grid"><div class="card"><div class="big">${candidates||"—"}</div><div class="label">Candidates</div><div class="sub">HireFlow</div></div><div class="card"><div class="big">${prospects||"—"}</div><div class="label">Prospects</div><div class="sub">SalesFlow</div></div><div class="card"><div class="big">${kb||"—"}</div><div class="label">KB Items</div><div class="sub">SupportFlow</div></div></div><div class="grid"><div class="card"><div class="big">${hours}h</div><div class="label">Hours Saved</div><div class="sub">vs manual</div></div><div class="card"><div class="big">&#8377;${roi}L</div><div class="label">Monthly ROI</div><div class="sub">at &#8377;1200/hr</div></div><div class="card"><div class="big">${state.crossEvents?.length||0}</div><div class="label">Cross-agent Signals</div><div class="sub">this session</div></div></div><h2>Agent Handoffs & Debates</h2>${debates.map(d=>`<div class="${d.type==="dispute"?"dispute":d.type==="resolve"?"resolve":"handoff"}"><strong>${d.from} ${d.type==="dispute"?"⚔️":d.type==="resolve"?"✅":"→"} ${d.to}</strong><br>${d.msg}</div>`).join("")}<p style="margin-top:40px;color:#9CA3AF;font-size:12px">NexFlow AI · Powered by Llama 3.3 70B via Groq</p></body></html>`);
     win.document.close();
     setTimeout(()=>win.print(),400);
   };
@@ -4897,7 +4897,7 @@ function HiringShell(){
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:"2px 8px 2px 0",borderRight:"1px solid #F3F4F6",marginRight:8}} onMouseEnter={e=>e.currentTarget.style.opacity="0.7"} onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
               <div style={{width:22,height:22,borderRadius:6,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11}}>⚡</div>
-              <span style={{fontSize:10,fontWeight:800,color:"#9CA3AF"}}>FlowZint</span>
+              <span style={{fontSize:10,fontWeight:800,color:"#9CA3AF"}}>NexFlow</span>
             </button>
             <div style={{width:28,height:28,borderRadius:8,background:"#F5F3FF",border:"1.5px solid #C4BFFA",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>🧠</div>
             <div><div style={{fontSize:13,fontWeight:800,color:"#111827"}}>HireFlow AI</div><div style={{fontSize:10,color:"#9CA3AF",marginTop:1}}>{done?(state.appliedResumes?.length||state.activeCandidates?.length||5)+" resumes · "+(state.activeCandidates?.length||5)+" shortlisted":"Ready to run"}</div></div>
@@ -4948,13 +4948,13 @@ function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
   return(
     <header style={{background:"white",borderBottom:"1px solid #F3F4F6",padding:"12px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 6px rgba(0,0,0,0.06)"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
-        {/* FlowZint brand */}
+        {/* NexFlow brand */}
         <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
           style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",padding:"4px 8px 4px 0",borderRight:"1px solid #F3F4F6",marginRight:8}}
           onMouseEnter={e=>e.currentTarget.style.opacity="0.7"}
           onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
           <div style={{width:26,height:26,borderRadius:7,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,boxShadow:"0 0 10px rgba(109,95,250,0.4)"}}>⚡</div>
-          <span style={{fontSize:11,fontWeight:800,color:"#6B7280"}}>FlowZint</span>
+          <span style={{fontSize:11,fontWeight:800,color:"#6B7280"}}>NexFlow</span>
         </button>
         {/* Mode identity */}
         <div style={{width:34,height:34,borderRadius:9,background:color+"18",border:"1.5px solid "+color+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>{icon}</div>
@@ -5052,7 +5052,7 @@ function AppInner(){
   if(mode==="overview") return(
     <PageTransition modeKey="overview">
       <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
-        <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="FlowZint AI" tagColor="neutral"/>
+        <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="NexFlow AI" tagColor="neutral"/>
         <main style={{flex:1,overflow:"hidden"}}><ErrorBoundary><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></ErrorBoundary></main>
         <ToastLayer/>
       </div>
@@ -5199,7 +5199,7 @@ function AuthScreen({onAuth}){
       {/* Left panel — branding */}
       <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 48px",display:"none"}} className="auth-left">
         <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:"-0.02em",marginBottom:12}}>
-          <span style={{background:"linear-gradient(135deg,#6D5FFA,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>FlowZint AI</span>
+          <span style={{background:"linear-gradient(135deg,#6D5FFA,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>NexFlow AI</span>
         </div>
         <div style={{fontSize:18,color:"#9CA3AF",lineHeight:1.6,marginBottom:32}}>Multi-agent business intelligence for Indian SMBs. 6 AI agents, one command center.</div>
         {[
@@ -5224,7 +5224,7 @@ function AuthScreen({onAuth}){
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
             <div style={{width:40,height:40,background:"linear-gradient(135deg,#534AB7,#7F77DD)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 0 20px rgba(109,95,250,0.4)"}}>⚡</div>
             <div>
-              <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>FlowZint AI</div>
+              <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>NexFlow AI</div>
               <div style={{fontSize:11,color:"#6B7280"}}>Multi-Agent Intelligence Platform</div>
             </div>
           </div>
