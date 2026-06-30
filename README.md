@@ -1,4 +1,4 @@
-# FlowZint AI — Multi-Agent Business Intelligence Platform
+# NexFlow AI — Multi-Agent Business Intelligence Platform
 
 > **Live demo → [hireflow-ai-liart.vercel.app](https://hireflow-ai-liart.vercel.app)**  
 > Sign in with Google, email/password, or click **Try Demo** for instant access.
@@ -46,7 +46,7 @@ A multi-agent AI platform where 6 autonomous systems — hiring, sales, support,
 
 ## What It Does
 
-Most AI tools are single-purpose. FlowZint AI runs 6 specialized agents simultaneously and lets them talk to each other — a sales lead auto-routes to the hiring pipeline, a support escalation triggers a care ticket, and the War Room orchestrates all of them in one command.
+Most AI tools are single-purpose. NexFlow AI runs 6 specialized agents simultaneously and lets them talk to each other — a sales lead auto-routes to the hiring pipeline, a support escalation triggers a care ticket, and the War Room orchestrates all of them in one command.
 
 ---
 
