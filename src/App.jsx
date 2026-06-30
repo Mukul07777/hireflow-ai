@@ -196,8 +196,31 @@ const GROQ_MODEL="llama-3.3-70b-versatile";
 let HINDI_MODE=false; // synced from React state by HindiSync component
 const HINDI_SUFFIX="\n\nIMPORTANT: Respond in Hinglish — a natural mix of Hindi and English the way educated Indians actually speak and text. Write in Roman script (not Devanagari). Example style: 'Aapka pipeline ready hai — 5 candidates shortlist hue hain, top pick Aditya Kumar hai jo 91/100 score kiya. Uska notice period 30 days hai toh jaldi decision lena padega.' Keep it warm, conversational, and professional.";
 
+// ── ACTIVITY LOG (live backend transparency) ──────────────────────────────
+const _actLog=[];
+let _callCount=0;
+const _actListeners=new Set();
+function _pushActivity(entry){
+  _actLog.unshift({...entry,id:Date.now()+Math.random(),ts:new Date()});
+  if(_actLog.length>40)_actLog.pop();
+  _actListeners.forEach(fn=>fn([..._actLog]));
+}
+function useActivityLog(){
+  const[log,setLog]=useState([..._actLog]);
+  useEffect(()=>{
+    _actListeners.add(setLog);
+    return()=>_actListeners.delete(setLog);
+  },[]);
+  return log;
+}
+
 // Non-streaming (used for structured JSON responses)
 async function callClaude(messages,system=""){
+  const callId=++_callCount;
+  const keyIdx=_keyIdx%_GROQ_KEYS.length;
+  const promptLen=messages.reduce((n,m)=>n+(m.content?.length||0),0)+(system?.length||0);
+  const t0=Date.now();
+  _pushActivity({type:"api",status:"pending",callId,model:GROQ_MODEL,mode:"json",promptChars:promptLen,keySlot:keyIdx+1,totalKeys:_GROQ_KEYS.length,label:system.slice(0,60)||"AI call"});
   try{
     const sys=(HINDI_MODE&&!system.includes("JSON"))?system+HINDI_SUFFIX:system;
     const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
@@ -207,12 +230,23 @@ async function callClaude(messages,system=""){
       body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages})
     });
     const data=await res.json();
-    return data.choices?.[0]?.message?.content||"";
-  }catch{return"";}
+    const txt=data.choices?.[0]?.message?.content||"";
+    const ms=Date.now()-t0;
+    _pushActivity({type:"api",status:"done",callId,model:GROQ_MODEL,mode:"json",promptChars:promptLen,keySlot:keyIdx+1,totalKeys:_GROQ_KEYS.length,label:system.slice(0,60)||"AI call",ms,outputChars:txt.length,tokensEst:Math.round((promptLen+txt.length)/4)});
+    return txt;
+  }catch(e){
+    _pushActivity({type:"api",status:"error",callId,model:GROQ_MODEL,label:system.slice(0,60)||"AI call",error:e.message});
+    return"";
+  }
 }
 
 // Real SSE streaming — onChunk(accumulatedText, newToken)
 async function callClaudeStream(messages,system="",onChunk){
+  const callId=++_callCount;
+  const keyIdx=_keyIdx%_GROQ_KEYS.length;
+  const promptLen=messages.reduce((n,m)=>n+(m.content?.length||0),0)+(system?.length||0);
+  const t0=Date.now();
+  _pushActivity({type:"api",status:"streaming",callId,model:GROQ_MODEL,mode:"stream",promptChars:promptLen,keySlot:keyIdx+1,totalKeys:_GROQ_KEYS.length,label:system.slice(0,60)||"AI stream"});
   try{
     const sys=HINDI_MODE?(system+HINDI_SUFFIX):system;
     const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
@@ -239,8 +273,13 @@ async function callClaudeStream(messages,system="",onChunk){
         }catch{}
       }
     }
+    const ms=Date.now()-t0;
+    _pushActivity({type:"api",status:"done",callId,model:GROQ_MODEL,mode:"stream",promptChars:promptLen,keySlot:keyIdx+1,totalKeys:_GROQ_KEYS.length,label:system.slice(0,60)||"AI stream",ms,outputChars:full.length,tokensEst:Math.round((promptLen+full.length)/4)});
     return full;
-  }catch{return"";}
+  }catch(e){
+    _pushActivity({type:"api",status:"error",callId,model:GROQ_MODEL,label:system.slice(0,60)||"AI stream",error:e.message});
+    return"";
+  }
 }
 
 // ── TEXT TO SPEECH ───────────────────────────────────────────────────────────
@@ -858,6 +897,110 @@ function HomeScreen(){
     </div>
   );
 }
+// ── SALARY NEGOTIATION PANEL ──────────────────────────────────────────────
+function SalaryNegotiationPanel({candidate,selScore}){
+  const[open,setOpen]=useState(false);
+  const[budget,setBudget]=useState("");
+  const[ask,setAsk]=useState((candidate?.salary||candidate?.parsedSalary||"").toString());
+  const[loading,setLoading]=useState(false);
+  const[result,setResult]=useState("");
+  const exp=candidate?.exp||"";
+  const role=candidate?.role||"";
+  const name=candidate?.name||"Candidate";
+  const loc=candidate?.location||candidate?.parsedCity||"India";
+  // Reset when candidate changes
+  useEffect(()=>{setResult("");setAsk((candidate?.salary||candidate?.parsedSalary||"").toString());},[candidate?.id]);
+  const generate=async()=>{
+    if(!budget||!ask){return;}
+    setLoading(true);setResult("");
+    const budgetN=parseFloat(budget);
+    const askN=parseFloat(ask);
+    const gap=askN-budgetN;
+    const gapPct=Math.round((gap/budgetN)*100);
+    const prompt=`You are a senior Indian HR professional and salary negotiation expert.
+
+Candidate: ${name}
+Role: ${role}
+Experience: ${exp}
+Location: ${loc}
+AI Score: ${selScore}/100
+Candidate's Ask: ₹${askN}L per annum
+Company Budget: ₹${budgetN}L per annum
+Gap: ₹${gap}L (${gapPct}% above budget)
+
+Generate exactly 3 salary negotiation strategies for this Indian hiring context. Each strategy should be realistic, use actual Indian salary market context, and include specific talking points. Format:
+
+STRATEGY 1: [Name — e.g., "Anchor on Value"]
+Script: [2-3 sentences the HR person actually says, in professional Indian business English]
+Psychology: [Why this works for Indian candidates]
+Fallback: [What to say if they push back]
+
+STRATEGY 2: [Name — e.g., "ESOP Bridge"]
+Script: ...
+Psychology: ...
+Fallback: ...
+
+STRATEGY 3: [Name — e.g., "Market Band Reality Check"]
+Script: ...
+Psychology: ...
+Fallback: ...
+
+MARKET CONTEXT: [1 sentence on current Indian market salary for this role/exp/location]
+
+Be specific — mention Indian-relevant details like notice period, ESOPs, variable pay, joining bonus as tools when relevant.`;
+    const txt=await callClaude([{role:"user",content:prompt}],"Indian HR salary negotiation expert. Be direct, practical, India-specific.");
+    setResult(txt);
+    setLoading(false);
+  };
+  if(!open){
+    return(
+      <div style={{marginBottom:10}}>
+        <button onClick={()=>setOpen(true)} style={{width:"100%",padding:"9px 14px",background:"linear-gradient(135deg,#F59E0B,#D97706)",border:"none",borderRadius:10,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+          💰 Negotiate Salary — AI Scripts
+        </button>
+      </div>
+    );
+  }
+  return(
+    <div style={{background:"#FFFBEB",border:"1.5px solid #FCD34D",borderRadius:12,padding:14,marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:800,color:"#92400E"}}>💰 Salary Negotiation AI</div>
+        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",cursor:"pointer",color:"#B45309",fontSize:16}}>×</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:"#78350F",display:"block",marginBottom:4}}>YOUR BUDGET (LPA)</label>
+          <input value={budget} onChange={e=>setBudget(e.target.value)} placeholder="e.g. 38" type="number" style={{width:"100%",padding:"8px 10px",border:"1.5px solid #FCD34D",borderRadius:8,fontSize:13,background:"#fff",boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <label style={{fontSize:11,fontWeight:700,color:"#78350F",display:"block",marginBottom:4}}>THEIR ASK (LPA)</label>
+          <input value={ask} onChange={e=>setAsk(e.target.value)} placeholder="e.g. 45" type="number" style={{width:"100%",padding:"8px 10px",border:"1.5px solid #FCD34D",borderRadius:8,fontSize:13,background:"#fff",boxSizing:"border-box"}}/>
+        </div>
+      </div>
+      {budget&&ask&&parseFloat(ask)>parseFloat(budget)&&(
+        <div style={{background:"#FEF3C7",border:"1px solid #FCD34D",borderRadius:8,padding:"6px 10px",marginBottom:8,fontSize:12,color:"#92400E"}}>
+          Gap: <strong>₹{(parseFloat(ask)-parseFloat(budget)).toFixed(1)}L</strong> ({Math.round(((parseFloat(ask)-parseFloat(budget))/parseFloat(budget))*100)}% above budget) — AI will generate scripts to bridge this
+        </div>
+      )}
+      <Btn variant="primary" fullWidth onClick={generate} disabled={loading||!budget||!ask}>
+        {loading?"Generating scripts...":"⚡ Generate 3 Negotiation Scripts"}
+      </Btn>
+      {result&&(
+        <div style={{marginTop:12,fontSize:12,color:"#451A03",lineHeight:1.75}}>
+          {result.split("\n").map((line,i)=>{
+            const isHeader=line.match(/^STRATEGY\s+\d+:|^MARKET CONTEXT:/);
+            const isLabel=line.match(/^(Script:|Psychology:|Fallback:)/);
+            if(!line.trim())return<div key={i} style={{height:6}}/>;
+            if(isHeader)return<div key={i} style={{fontWeight:800,color:"#92400E",fontSize:13,marginTop:10,marginBottom:4,padding:"4px 8px",background:"#FEF3C7",borderRadius:6}}>{line}</div>;
+            if(isLabel)return<div key={i} style={{fontWeight:700,color:"#78350F",marginTop:4}}>{line}</div>;
+            return<div key={i}>{line}</div>;
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── APPROVAL MODAL ────────────────────────────────────────────────────────
 const DEMO_EMAIL_KEY="hireflow_demo_email";
 function ApprovalModal({candidate:c,onClose}){
@@ -2351,6 +2494,7 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
             <Btn variant="primary" fullWidth onClick={()=>setModal(state.selectedCandidate)}>Review outreach email</Btn>
             <Btn variant="secondary" onClick={()=>dispatch({type:"SET_NAV",payload:"interviews"})}>Interview Qs</Btn>
           </div>
+          <SalaryNegotiationPanel candidate={sel} selScore={selScore}/>
           <CandidateDecisionBar
             candidate={state.selectedCandidate}
             decision={state.candidateDecisions[state.selectedCandidate.id]}
@@ -3744,6 +3888,91 @@ function SMBMode(){
   );
 }
 
+// ── PREDICTIVE INTELLIGENCE PANEL ────────────────────────────────────────
+function PredictivePanel({metrics,confidence,state}){
+  const[loading,setLoading]=useState(false);
+  const[result,setResult]=useState("");
+  const[open,setOpen]=useState(false);
+  const generate=async()=>{
+    setLoading(true);setOpen(true);setResult("");
+    // Load past sessions from localStorage
+    let pastSessions=[];
+    try{
+      const raw=localStorage.getItem("war_room_sessions");
+      if(raw)pastSessions=JSON.parse(raw).slice(0,5);
+    }catch{}
+    const avgConf=confidence&&Object.values(confidence).length>0
+      ?Math.round(Object.values(confidence).reduce((s,c)=>s+(c.pct||80),0)/Object.values(confidence).length)
+      :80;
+    const sessionsText=pastSessions.length>0
+      ?pastSessions.map((s,i)=>`Run ${i+1} (${s.date||"past"}): ${s.candidates||0} candidates, ${s.prospects||0} prospects, ${s.kb_items||0} KB items, ${s.handoffs||0} handoffs`).join("\n")
+      :"No past session data available (first run)";
+    const prompt=`You are a senior business intelligence AI analyzing an Indian SMB's operational patterns to make forward-looking recommendations.
+
+CURRENT RUN DATA:
+- Candidates shortlisted: ${state.activeCandidates?.length||0}
+- Sales prospects: ${state.salesProspects?.length||0}
+- Support KB items: ${state.supportKB?.length||0}
+- Care tickets: ${state.careTickets?.length||0}
+- Cross-agent handoffs: ${metrics?.handoffs||0}
+- Avg agent confidence: ${avgConf}%
+
+PAST WAR ROOM SESSIONS:
+${sessionsText}
+
+Based on this data, provide:
+
+TREND ANALYSIS: [2-3 sentences on what's changing across runs — hiring velocity, sales momentum, support load trends]
+
+⚠️ RISK ALERT: [1 specific operational risk you see — e.g., "Support volume growing faster than team capacity"]
+
+📈 NEXT 30 DAYS — PREDICTION:
+- Hiring: [specific prediction based on trends]
+- Sales: [specific prediction]
+- Support: [specific prediction]
+
+🎯 RECOMMENDED ACTIONS (this week):
+1. [Most urgent action — be specific, Indian SMB context]
+2. [Second action]
+3. [Third action]
+
+💡 SMART SCHEDULING: [When to run the next War Room and why — give a specific date range like "Run again in 2 weeks when..."]
+
+Be specific to Indian SMB context — mention realistic numbers, Indian market conditions, and practical next steps.`;
+    const txt=await callClaude([{role:"user",content:prompt}],"Senior Indian business intelligence analyst. Provide actionable forward-looking predictions.");
+    setResult(txt);setLoading(false);
+  };
+  return(
+    <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} style={{marginTop:12}}>
+      {!open?(
+        <button onClick={generate} style={{width:"100%",padding:"14px",background:"linear-gradient(135deg,#1C1C2E,#2D1B69)",border:"none",borderRadius:14,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8,boxShadow:"0 4px 20px rgba(83,74,183,0.3)"}}>
+          {loading?<><Spinner/> Analyzing trends...</>:<>🔮 Predictive Intelligence — What Happens Next?</>}
+        </button>
+      ):(
+        <Card style={{padding:16,background:"linear-gradient(135deg,#0F0F1A,#1E1B4B)",border:"1.5px solid #4338CA"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+            <div style={{fontSize:13,fontWeight:800,color:"#A5B4FC"}}>🔮 Predictive Intelligence</div>
+            <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"#6B7280",cursor:"pointer",fontSize:16}}>×</button>
+          </div>
+          {loading&&<div style={{display:"flex",alignItems:"center",gap:10,color:"#7C3AED",fontSize:13}}><Spinner/> AI is analyzing {(() => {try{return JSON.parse(localStorage.getItem("war_room_sessions")||"[]").length}catch{return 0}})()} past sessions + current run...</div>}
+          {result&&(
+            <div style={{fontSize:12,color:"#C7D2FE",lineHeight:1.8}}>
+              {result.split("\n").map((line,i)=>{
+                const isHeader=line.match(/^(TREND ANALYSIS|⚠️ RISK|📈 NEXT|🎯 RECOMMENDED|💡 SMART)/);
+                const isSub=line.match(/^- (Hiring|Sales|Support):/)||line.match(/^\d+\./);
+                if(!line.trim())return<div key={i} style={{height:6}}/>;
+                if(isHeader)return<div key={i} style={{color:"#818CF8",fontWeight:800,fontSize:13,marginTop:12,marginBottom:4,padding:"4px 8px",background:"rgba(99,102,241,0.15)",borderRadius:6,borderLeft:"3px solid #6366F1"}}>{line}</div>;
+                if(isSub)return<div key={i} style={{color:"#A5B4FC",fontWeight:600,marginLeft:8,marginTop:2}}>{line}</div>;
+                return<div key={i} style={{color:"#C7D2FE"}}>{line}</div>;
+              })}
+            </div>
+          )}
+        </Card>
+      )}
+    </motion.div>
+  );
+}
+
 // ── WAR ROOM MODE ─────────────────────────────────────────────────────────
 function WarRoomMode(){
   const{state,dispatch}=useStore();
@@ -4328,6 +4557,7 @@ function WarRoomMode(){
           </Card>
         </motion.div>
       )}
+      {done&&<PredictivePanel metrics={metrics} confidence={confidence} state={state}/>}
     </div>
   );
 }
@@ -4737,6 +4967,79 @@ function ApiKeyBanner(){
   );
 }
 
+// ── ACTIVITY PANEL — live backend transparency ────────────────────────────
+function ActivityPanel(){
+  const[open,setOpen]=useState(false);
+  const[pulse,setPulse]=useState(false);
+  const log=useActivityLog();
+  const prevLen=useRef(0);
+  useEffect(()=>{
+    if(log.length>prevLen.current){setPulse(true);const t=setTimeout(()=>setPulse(false),600);prevLen.current=log.length;return()=>clearTimeout(t);}
+  },[log.length]);
+  const activeNow=log.filter(e=>e.status==="streaming"||e.status==="pending").length;
+  const totalCalls=log.filter(e=>e.status==="done").length;
+  const avgMs=totalCalls>0?Math.round(log.filter(e=>e.ms).reduce((s,e)=>s+e.ms,0)/totalCalls):0;
+  const statusColor={done:"#22C55E",streaming:"#F59E0B",pending:"#F59E0B",error:"#EF4444"};
+  const statusIcon={done:"✓",streaming:"⟳",pending:"⌛",error:"✕"};
+  return(
+    <>
+      {/* Floating badge */}
+      <div onClick={()=>setOpen(o=>!o)} style={{position:"fixed",bottom:24,right:24,zIndex:99990,cursor:"pointer",display:"flex",alignItems:"center",gap:8,background:open?"#1C1C2E":"#1C1C2E",border:"1.5px solid "+(activeNow>0?"#F59E0B":"#534AB7"),borderRadius:32,padding:"8px 14px",boxShadow:"0 4px 24px rgba(83,74,183,0.25)",transition:"all 0.2s",transform:pulse?"scale(1.08)":"scale(1)"}}>
+        <div style={{width:8,height:8,borderRadius:"50%",background:activeNow>0?"#F59E0B":"#534AB7",animation:activeNow>0?"pulse 1s infinite":undefined}}/>
+        <span style={{fontSize:12,fontWeight:700,color:"#fff",letterSpacing:"0.03em"}}>
+          {activeNow>0?`⚡ AI Running (${activeNow})`:`🔍 AI Log (${totalCalls} calls)`}
+        </span>
+        <span style={{fontSize:11,color:"#9CA3AF"}}>{open?"▼":"▲"}</span>
+      </div>
+      {/* Panel */}
+      {open&&(
+        <div style={{position:"fixed",bottom:70,right:24,zIndex:99989,width:380,maxHeight:420,background:"#0F0F1A",border:"1.5px solid #2D2B4E",borderRadius:16,boxShadow:"0 8px 40px rgba(0,0,0,0.5)",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",borderBottom:"1px solid #2D2B4E",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:800,color:"#fff"}}>🧠 Live Backend Activity</div>
+              <div style={{fontSize:11,color:"#6B7280",marginTop:2}}>
+                {totalCalls} API calls · avg {avgMs}ms · model: {GROQ_MODEL.split("-").slice(0,3).join("-")} · {_GROQ_KEYS.length} key{_GROQ_KEYS.length!==1?"s":""} rotating
+              </div>
+            </div>
+            <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"#6B7280",cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>
+          </div>
+          <div style={{overflowY:"auto",flex:1,padding:"8px 0"}}>
+            {log.length===0&&<div style={{padding:"20px 16px",textAlign:"center",color:"#4B5563",fontSize:12}}>No AI calls yet. Start any agent to see live activity.</div>}
+            {log.map(entry=>(
+              <div key={entry.id} style={{padding:"8px 16px",borderBottom:"1px solid #1A1A2E",display:"flex",gap:10,alignItems:"flex-start"}}>
+                <div style={{width:20,height:20,borderRadius:"50%",background:statusColor[entry.status]||"#4B5563",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:"#fff",marginTop:1,animation:entry.status==="streaming"?"spin 1s linear infinite":undefined}}>
+                  {statusIcon[entry.status]||"?"}
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,color:"#E5E7EB",fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    {entry.status==="streaming"?"⟳ ":""}{entry.label||"AI call"}
+                  </div>
+                  <div style={{fontSize:11,color:"#6B7280",marginTop:2,display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {entry.mode&&<span style={{color:"#7C3AED"}}>#{entry.callId} {entry.mode}</span>}
+                    {entry.keySlot&&<span>🔑 key {entry.keySlot}/{entry.totalKeys}</span>}
+                    {entry.promptChars&&<span>📝 {entry.promptChars}ch in</span>}
+                    {entry.outputChars&&<span>→ {entry.outputChars}ch out</span>}
+                    {entry.tokensEst&&<span style={{color:"#10B981"}}>~{entry.tokensEst} tokens</span>}
+                    {entry.ms&&<span style={{color:"#F59E0B"}}>⏱ {entry.ms}ms</span>}
+                    {entry.status==="error"&&<span style={{color:"#EF4444"}}>✕ {entry.error}</span>}
+                  </div>
+                  <div style={{fontSize:10,color:"#374151",marginTop:1}}>{entry.ts?.toLocaleTimeString()}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{padding:"8px 16px",borderTop:"1px solid #2D2B4E",display:"flex",gap:16,fontSize:11,color:"#4B5563"}}>
+            <span>🟢 Done: {log.filter(e=>e.status==="done").length}</span>
+            <span>🟡 Active: {activeNow}</span>
+            <span>🔴 Errors: {log.filter(e=>e.status==="error").length}</span>
+            <span style={{marginLeft:"auto",color:"#374151"}}>Groq Llama 3.3 70B</span>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function HindiSync(){
   const{state}=useStore();
   const first=useRef(true);
@@ -4783,6 +5086,7 @@ export default function App(){
       <ApiKeyBanner/>
       <HindiSync/>
       <AppDataLoader/>
+      <ActivityPanel/>
       <AppInner/>
       </div>
     </Ctx.Provider>
