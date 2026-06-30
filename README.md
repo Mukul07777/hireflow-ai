@@ -96,8 +96,3 @@ src/
 
 State: single useReducer at root. AI: module-level callClaude() and callClaudeStream() with round-robin key rotation.
 
----
-
-## Hackathon
-
-FlowZint AI Hackathon 2026 — Rs 3,00,000 prize pool
