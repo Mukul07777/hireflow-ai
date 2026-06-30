@@ -3753,6 +3753,8 @@ function WarRoomMode(){
   const[debates,setDebates]=useState([]);
   const[voiceEnabled,setVoiceEnabled]=useState(false);
   const[lastRun,setLastRun]=useState(null);
+  const[confidence,setConfidence]=useState({});   // {1: {pct:87, reason:"...", low:false}, ...}
+  const[lowConfHelp,setLowConfHelp]=useState([]); // extra help-request debate cards
   useEffect(()=>{setTTSEnabled(voiceEnabled);},[voiceEnabled]);
   useEffect(()=>{
     // Try Supabase first, fall back to localStorage
@@ -3827,7 +3829,7 @@ function WarRoomMode(){
   ];
 
   const run=async()=>{
-    setRunning(true);setDebates([]);setMetrics(null);setPhaseResults({});
+    setRunning(true);setDebates([]);setMetrics(null);setPhaseResults({});setConfidence({});setLowConfHelp([]);
     toast("War Room activated — all 4 AI systems online","info");
 
     // Phase 0: Context briefing — real AI
@@ -3851,12 +3853,25 @@ function WarRoomMode(){
     let p1="";
     const d1id=addDebate("🧠 HireFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD context"}\n\nReport your pipeline status in 2 sentences. Then output exactly: HANDOFF_TO_SALES: [name 1-2 candidates rejected due to budget/location mismatch who are warm leads for a software sales team, comma separated, or "none"]`}],
-      "HireFlow agent. Data-driven. Reference actual candidate names and scores. 80 words max.",
+      [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD context"}\n\nReport your pipeline status in 2 sentences. Then output exactly on separate lines:\nHANDOFF_TO_SALES: [name 1-2 candidates rejected due to budget/location mismatch, or "none"]\nCONFIDENCE: [a number 55-98]% — [one specific reason you are or aren't fully certain, e.g. "limited salary data for this market"]`}],
+      "HireFlow agent. Data-driven. Reference actual candidate names and scores. 90 words max.",
       (acc)=>{p1=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));setDebates(prev=>prev.map(d=>d.id===d1id?{...d,msg:acc}:d));}
     );
     finishDebate(d1id,p1);
     speak(p1);
+    // Parse confidence
+    {const m=p1.match(/CONFIDENCE:\s*(\d+)%\s*[—–-]\s*(.+)/i);
+     if(m){const pct=parseInt(m[1]);const reason=m[2].replace(/HANDOFF_TO_SALES:.*/i,"").trim();
+       setConfidence(prev=>({...prev,1:{pct,reason,low:pct<70}}));
+       if(pct<70){speak(`HireFlow confidence low at ${pct}%. Requesting SalesFlow input.`);
+         const hid=addDebate("🧠 HireFlow","🎯 SalesFlow","dispute");
+         let ht="";
+         await callClaudeStream([{role:"user",content:`HireFlow AI is ${pct}% confident on its hiring report because: "${reason}". You are SalesFlow AI. In 2 sentences, give HireFlow specific data or market context that would increase confidence — reference Indian market hiring norms, salary benchmarks, or prospect-pipeline overlap.`}],
+           "SalesFlow. Helpful, specific. Indian market context. 50 words max.",(acc)=>{ht=acc;setDebates(prev=>prev.map(d=>d.id===hid?{...d,msg:acc}:d));});
+         finishDebate(hid,ht);
+         dispatch({type:"ADD_CROSS_EVENT",event:{type:"confidence_assist",title:"⚠️ HireFlow requested help",desc:`Low confidence (${pct}%) — SalesFlow provided context`,action:"Confidence boosted"}});
+       }
+    }
     const handoffMatch=p1.match(/HANDOFF_TO_SALES:\s*(.+)/i);
     const hireflowHandoff=handoffMatch?handoffMatch[1].replace(/\[|\]/g,"").trim():"";
     if(hireflowHandoff&&hireflowHandoff.toLowerCase()!=="none"){
@@ -3910,12 +3925,24 @@ function WarRoomMode(){
     let p2="";
     const d2id=addDebate("🎯 SalesFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from HireFlow: "${hireflowHandoff||"no candidates handed off"}" — these are rejected candidates who are warm leads. Acknowledge them.\n\nResolution from debate: "${resolve1.slice(0,100)}"\n\nYour prospect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint}):"No prospects yet"}\n\nReport in 2 sentences: what you accepted from HireFlow, your top prospect, and next action. Then output exactly: HANDOFF_TO_SUPPORT: [the top objection from prospects, e.g. "pricing too high"]`}],
-      "SalesFlow agent. Reference HireFlow handoff explicitly. 80 words max.",
+      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from HireFlow: "${hireflowHandoff||"no candidates handed off"}" — warm leads. Acknowledge them.\nDebate resolution: "${resolve1.slice(0,80)}"\n\nYour prospect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint}):"No prospects yet"}\n\nReport in 2 sentences: what you accepted from HireFlow, top prospect, next action. Then output exactly on separate lines:\nHANDOFF_TO_SUPPORT: [top objection from prospects]\nCONFIDENCE: [a number 55-98]% — [one specific reason you are or aren't fully certain]`}],
+      "SalesFlow agent. Reference HireFlow handoff explicitly. 90 words max.",
       (acc)=>{p2=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));setDebates(prev=>prev.map(d=>d.id===d2id?{...d,msg:acc}:d));}
     );
     finishDebate(d2id,p2);
     speak(p2);
+    {const m=p2.match(/CONFIDENCE:\s*(\d+)%\s*[—–-]\s*(.+)/i);
+     if(m){const pct=parseInt(m[1]);const reason=m[2].replace(/HANDOFF_TO_\w+:.*/i,"").trim();
+       setConfidence(prev=>({...prev,2:{pct,reason,low:pct<70}}));
+       if(pct<70){speak(`SalesFlow confidence low at ${pct}%. Requesting SupportFlow input.`);
+         const hid=addDebate("🎯 SalesFlow","💬 SupportFlow","dispute");
+         let ht="";
+         await callClaudeStream([{role:"user",content:`SalesFlow AI is ${pct}% confident on its sales report because: "${reason}". You are SupportFlow AI. In 2 sentences, provide specific customer feedback data or KB insights that would help SalesFlow increase confidence — reference actual support patterns or common Indian B2B objections.`}],
+           "SupportFlow. Helpful, specific. 50 words max.",(acc)=>{ht=acc;setDebates(prev=>prev.map(d=>d.id===hid?{...d,msg:acc}:d));});
+         finishDebate(hid,ht);
+         dispatch({type:"ADD_CROSS_EVENT",event:{type:"confidence_assist",title:"⚠️ SalesFlow requested help",desc:`Low confidence (${pct}%) — SupportFlow provided context`,action:"Confidence boosted"}});
+       }
+    }
     const objMatch=p2.match(/HANDOFF_TO_SUPPORT:\s*(.+)/i);
     const salesHandoff=objMatch?objMatch[1].replace(/\[|\]/g,"").trim():"pricing concerns";
     dispatch({type:"ADD_CROSS_EVENT",event:{type:"sales_to_support",title:"SalesFlow → SupportFlow",desc:"Top objection: "+salesHandoff,action:"Added to KB"}});
@@ -3953,12 +3980,24 @@ function WarRoomMode(){
     let p3="";
     const d3id=addDebate("💬 SupportFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\n⚡ INCOMING: SalesFlow objection (reframed after debate): "${resolve2.slice(0,100)||salesHandoff}". Added to KB.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample: "+state.supportKB[0]?.q:"No KB built yet"}\n\nReport in 2 sentences: what you added to KB, escalation patterns detected. Then output exactly: HANDOFF_TO_CARE: [describe one high-priority customer needing CareFlow attention]`}],
-      "SupportFlow agent. Confirm KB update. Reference debate resolution. 80 words max.",
+      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\n⚡ INCOMING: SalesFlow objection (reframed): "${resolve2.slice(0,100)||salesHandoff}". Added to KB.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample: "+state.supportKB[0]?.q:"No KB built yet"}\n\nReport in 2 sentences: what you added to KB, escalation patterns. Then output exactly on separate lines:\nHANDOFF_TO_CARE: [one high-priority customer needing CareFlow attention]\nCONFIDENCE: [a number 55-98]% — [one specific reason you are or aren't fully certain]`}],
+      "SupportFlow agent. Confirm KB update. Reference debate resolution. 90 words max.",
       (acc)=>{p3=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));setDebates(prev=>prev.map(d=>d.id===d3id?{...d,msg:acc}:d));}
     );
     finishDebate(d3id,p3);
     speak(p3);
+    {const m=p3.match(/CONFIDENCE:\s*(\d+)%\s*[—–-]\s*(.+)/i);
+     if(m){const pct=parseInt(m[1]);const reason=m[2].replace(/HANDOFF_TO_\w+:.*/i,"").trim();
+       setConfidence(prev=>({...prev,3:{pct,reason,low:pct<70}}));
+       if(pct<70){speak(`SupportFlow confidence low at ${pct}%. Requesting CareFlow context.`);
+         const hid=addDebate("💬 SupportFlow","❤️ CareFlow","dispute");
+         let ht="";
+         await callClaudeStream([{role:"user",content:`SupportFlow AI is ${pct}% confident on its report because: "${reason}". You are CareFlow AI. In 2 sentences, provide specific ticket data or escalation patterns from the care queue that would help SupportFlow calibrate its KB entries.`}],
+           "CareFlow. Helpful, specific. 50 words max.",(acc)=>{ht=acc;setDebates(prev=>prev.map(d=>d.id===hid?{...d,msg:acc}:d));});
+         finishDebate(hid,ht);
+         dispatch({type:"ADD_CROSS_EVENT",event:{type:"confidence_assist",title:"⚠️ SupportFlow requested help",desc:`Low confidence (${pct}%) — CareFlow provided context`,action:"Confidence boosted"}});
+       }
+    }
     const escalMatch=p3.match(/HANDOFF_TO_CARE:\s*(.+)/i);
     const supportHandoff=escalMatch?escalMatch[1].replace(/\[|\]/g,"").trim():"high-priority escalation";
     dispatch({type:"ADD_CROSS_EVENT",event:{type:"support_to_care",title:"SupportFlow → CareFlow",desc:"Escalated: "+supportHandoff,action:"Priority ticket created"}});
@@ -3972,12 +4011,17 @@ function WarRoomMode(){
     let p4="";
     const d4id=addDebate("❤️ CareFlow","⚡ War Room");
     await callClaudeStream(
-      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from SupportFlow: "${supportHandoff}" — set URGENT priority.\n\nTicket queue: Raj Patel (billing, urgent), Priya Nair (tech, high), Amir Khan (enterprise upsell, normal), Sunita Rao (login, high), Vikram Singh (feedback, low).\n\nReport in 2 sentences: what SupportFlow escalated, your updated triage order, upsell detected. Then output exactly: HANDOFF_TO_SALES: [Amir Khan — enterprise upgrade, priority upsell]`}],
-      "CareFlow agent. Reference SupportFlow escalation explicitly. 80 words max.",
+      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\n⚡ INCOMING from SupportFlow: "${supportHandoff}" — URGENT.\n\nTicket queue: Raj Patel (billing, urgent), Priya Nair (tech, high), Amir Khan (enterprise upsell, normal), Sunita Rao (login, high), Vikram Singh (feedback, low).\n\nReport in 2 sentences: what SupportFlow escalated, updated triage, upsell detected. Then output exactly on separate lines:\nHANDOFF_TO_SALES: [Amir Khan — enterprise upgrade, priority upsell]\nCONFIDENCE: [a number 55-98]% — [one specific reason you are or aren't fully certain]`}],
+      "CareFlow agent. Reference SupportFlow escalation explicitly. 90 words max.",
       (acc)=>{p4=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));setDebates(prev=>prev.map(d=>d.id===d4id?{...d,msg:acc}:d));}
     );
     finishDebate(d4id,p4);
     speak(p4);
+    {const m=p4.match(/CONFIDENCE:\s*(\d+)%\s*[—–-]\s*(.+)/i);
+     if(m){const pct=parseInt(m[1]);const reason=m[2].replace(/HANDOFF_TO_\w+:.*/i,"").trim();
+       setConfidence(prev=>({...prev,4:{pct,reason,low:pct<70}}));
+     }
+    }
     const upsellMatch=p4.match(/HANDOFF_TO_SALES:\s*(.+)/i);
     if(upsellMatch){
       dispatch({type:"ADD_CROSS_EVENT",event:{type:"care_to_sales",title:"CareFlow → SalesFlow",desc:"Upsell: "+upsellMatch[1].replace(/\[|\]/g,"").trim(),action:"Routed to SalesFlow"}});
@@ -4008,7 +4052,7 @@ function WarRoomMode(){
     setPhase(6);
     let p6="";
     await callClaudeStream(
-      [{role:"user",content:`You are the War Room AI generating the final unified intelligence report.\n\n${lastRun?`MEMORY: Last run on ${lastRun.date} — ${lastRun.summary?.slice(0,120)}. Compare progress.\n\n`:""}\nWhat ran this session:\n- HireFlow: ${p1.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- SalesFlow: ${p2.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- SupportFlow: ${p3.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- CareFlow: ${p4.replace(/HANDOFF_TO_\w+:.+/gi,"").slice(0,120)}\n- Debates: 2 disagreements raised and resolved between agents\n\nWrite a 3-sentence executive summary: outcomes, cross-agent debates resolved, ROI in hours saved and rupees. Be specific with numbers.`}],
+      [{role:"user",content:`You are the War Room AI generating the final unified intelligence report.\n\n${lastRun?`MEMORY: Last run on ${lastRun.date} — ${lastRun.summary?.slice(0,120)}. Compare progress.\n\n`:""}\nWhat ran this session:\n- HireFlow: ${p1.replace(/HANDOFF_TO_\w+:.+/gi,"").replace(/CONFIDENCE:.+/gi,"").slice(0,120)} [confidence: ${confidence[1]?.pct||"?"}%]\n- SalesFlow: ${p2.replace(/HANDOFF_TO_\w+:.+/gi,"").replace(/CONFIDENCE:.+/gi,"").slice(0,120)} [confidence: ${confidence[2]?.pct||"?"}%]\n- SupportFlow: ${p3.replace(/HANDOFF_TO_\w+:.+/gi,"").replace(/CONFIDENCE:.+/gi,"").slice(0,120)} [confidence: ${confidence[3]?.pct||"?"}%]\n- CareFlow: ${p4.replace(/HANDOFF_TO_\w+:.+/gi,"").replace(/CONFIDENCE:.+/gi,"").slice(0,120)} [confidence: ${confidence[4]?.pct||"?"}%]\n- Debates: 2 agent disagreements raised and resolved\n- Peer reviews: ${Object.values(confidence).filter(c=>c.low).length} agents triggered automatic peer review\n\nWrite a 3-sentence executive summary: outcomes, collective confidence level, peer reviews triggered, ROI in hours saved and rupees. Be specific with numbers.`}],
       "War Room report AI. Authoritative. Specific numbers. 80 words max.",
       (acc)=>{p6=acc;setPhaseResults(prev=>({...prev,6:"📋 "+acc}));}
     );
@@ -4181,6 +4225,62 @@ function WarRoomMode(){
           </div>
         </Card>
       </div>
+
+      {/* Confidence Dashboard */}
+      {Object.keys(confidence).length>0&&(
+        <motion.div initial={{opacity:0,y:8}} animate={{opacity:1,y:0}} style={{marginBottom:14}}>
+          <Card style={{padding:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:800,color:"#374151"}}>🎯 Agent Confidence Scores</div>
+              <div style={{fontSize:10,color:"#9CA3AF"}}>Below 70% triggers automatic peer review</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+              {[{id:1,label:"HireFlow",icon:"🧠",color:"#6D5FFA"},{id:2,label:"SalesFlow",icon:"🎯",color:"#F59E0B"},{id:3,label:"SupportFlow",icon:"💬",color:"#10B981"},{id:4,label:"CareFlow",icon:"❤️",color:"#F43F5E"}].map(a=>{
+                const c=confidence[a.id];
+                if(!c)return(
+                  <div key={a.id} style={{background:"#F9FAFB",borderRadius:10,padding:"12px 10px",border:"1px solid #F3F4F6",opacity:0.5}}>
+                    <div style={{fontSize:11,fontWeight:700,color:"#9CA3AF"}}>{a.icon} {a.label}</div>
+                    <div style={{fontSize:10,color:"#D1D5DB",marginTop:6}}>Waiting...</div>
+                  </div>
+                );
+                const barColor=c.pct>=80?"#16A34A":c.pct>=70?"#D97706":"#DC2626";
+                const bg=c.pct>=80?"#F0FDF4":c.pct>=70?"#FEF3C7":"#FEF2F2";
+                const border=c.pct>=80?"#86EFAC":c.pct>=70?"#FDE68A":"#FECACA";
+                return(
+                  <motion.div key={a.id} initial={{opacity:0,scale:0.95}} animate={{opacity:1,scale:1}}
+                    style={{background:bg,borderRadius:10,padding:"12px 10px",border:`1px solid ${border}`}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                      <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{a.icon} {a.label}</div>
+                      {c.low&&<span style={{fontSize:8,fontWeight:800,padding:"1px 6px",borderRadius:20,background:"#FEE2E2",color:"#DC2626"}}>PEER REVIEW</span>}
+                    </div>
+                    <div style={{fontSize:26,fontWeight:900,color:barColor,lineHeight:1}}>{c.pct}%</div>
+                    {/* Animated bar */}
+                    <div style={{height:4,background:"#E5E7EB",borderRadius:4,marginTop:6,overflow:"hidden"}}>
+                      <motion.div initial={{width:0}} animate={{width:c.pct+"%"}} transition={{duration:0.8,ease:"easeOut"}}
+                        style={{height:"100%",borderRadius:4,background:barColor}}/>
+                    </div>
+                    <div style={{fontSize:9,color:"#6B7280",marginTop:5,lineHeight:1.4}}>{c.reason}</div>
+                  </motion.div>
+                );
+              })}
+            </div>
+            {/* Overall confidence */}
+            {Object.keys(confidence).length===4&&(()=>{
+              const avg=Math.round(Object.values(confidence).reduce((s,c)=>s+c.pct,0)/4);
+              const lowCount=Object.values(confidence).filter(c=>c.low).length;
+              return(
+                <div style={{marginTop:12,padding:"10px 14px",background:"linear-gradient(135deg,#EDE9FE,#F5F3FF)",borderRadius:10,border:"1.5px solid #A78BFA",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:800,color:"#5B21B6"}}>Collective confidence: {avg}%</div>
+                    <div style={{fontSize:10,color:"#7C3AED",marginTop:2}}>{lowCount>0?`${lowCount} agent${lowCount>1?"s":""} triggered peer review — additional context provided`:"All agents above threshold — no peer review needed"}</div>
+                  </div>
+                  <div style={{fontSize:28,fontWeight:900,color:avg>=80?"#6D28D9":avg>=70?"#D97706":"#DC2626"}}>{avg}%</div>
+                </div>
+              );
+            })()}
+          </Card>
+        </motion.div>
+      )}
 
       {/* AI Executive Summary */}
       {phaseResults[6]&&(
