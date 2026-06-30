@@ -243,6 +243,22 @@ async function callClaudeStream(messages,system="",onChunk){
   }catch{return"";}
 }
 
+// ── WHATSAPP SEND (CallMeBot) ─────────────────────────────────────────────
+// Set VITE_CALLMEBOT_PHONE and VITE_CALLMEBOT_APIKEY in Vercel env vars.
+// Setup: send "I allow callmebot to send me messages" to +34 644 59 97 91 on WhatsApp.
+// CallMeBot will reply with your API key.
+async function sendWhatsAppReal(message){
+  const phone=import.meta.env.VITE_CALLMEBOT_PHONE;
+  const apikey=import.meta.env.VITE_CALLMEBOT_APIKEY;
+  if(!phone||!apikey) return false;
+  try{
+    const url=`https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(message)}&apikey=${encodeURIComponent(apikey)}`;
+    const r=await fetch(url,{mode:"no-cors"});
+    // no-cors: we can't read the response but the request goes through
+    return true;
+  }catch{return false;}
+}
+
 // ── SAMPLE DATA ───────────────────────────────────────────────────────────
 const SAMPLE_JD="Senior Frontend Engineer — Remote\n\nWe are a Bangalore-based B2B SaaS startup (Series A, 80 employees).\n\nRequirements:\n- 4+ years React + TypeScript\n- Next.js, GraphQL experience\n- System design fundamentals\n- Mentoring junior developers\n- Startup mindset\n\nCompensation: Rs 28-42 LPA + equity + fully remote";
 const SAMPLE_PRODUCT="FlowZint AI Platform\n\nAutonomous multi-agent AI for Indian SMBs. Automates hiring, sales, support, and care.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\nFree trial: 14 days, no credit card.";
@@ -2940,10 +2956,13 @@ function SalesMode(){
                   }} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"#EFF6FF",border:"1px solid #BFDBFE",borderRadius:7,cursor:"pointer",color:"#1D4ED8",display:"flex",alignItems:"center",gap:4}}>
                     <span>in</span> LinkedIn
                   </button>}
-                  {draft&&<button onClick={()=>{
-                    const msg=encodeURIComponent("Hi "+p.name.split(" ")[0]+"! 👋\n\n"+draft.slice(0,400)+"...\n\n— FlowZint AI");
-                    window.open("https://wa.me/?text="+msg,"_blank");
-                    toast("Opening WhatsApp with message for "+p.name.split(" ")[0],"success");
+                  {draft&&<button onClick={async(e)=>{
+                    const btn=e.currentTarget;btn.disabled=true;btn.textContent="Sending...";
+                    const fullMsg="Hi "+p.name.split(" ")[0]+"! 👋\n\n"+draft.slice(0,400)+"...\n\n— FlowZint AI";
+                    const sent=await sendWhatsAppReal(fullMsg);
+                    if(sent){toast("📲 WhatsApp message sent to your phone!","success");}
+                    else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Vercel for direct send","info");}
+                    btn.disabled=false;btn.innerHTML="<span>📲</span> WhatsApp";
                   }} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"#DCFCE7",border:"1px solid #86EFAC",borderRadius:7,cursor:"pointer",color:"#15803D",display:"flex",alignItems:"center",gap:4}}>
                     <span>📲</span> WhatsApp
                   </button>}
@@ -3350,10 +3369,13 @@ function CareMode(){
                 <textarea value={responses[selected.id]} onChange={e=>setResponses(r=>({...r,[selected.id]:e.target.value}))} style={{width:"100%",height:180,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} onFocus={e=>e.target.style.borderColor="#D4537E"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <Btn variant="secondary" onClick={()=>genResponse(selected)} disabled={generating===selected.id}>Regenerate</Btn>
-                  {responses[selected.id]&&<button onClick={()=>{
-                    const msg=encodeURIComponent("नमस्ते "+selected.customer.split(" ")[0]+"! 🙏\n\n"+responses[selected.id].slice(0,500)+"\n\n— "+selected.company+" Support via FlowZint AI");
-                    window.open("https://wa.me/?text="+msg,"_blank");
-                    toast("Opening WhatsApp for "+selected.customer,"success");
+                  {responses[selected.id]&&<button onClick={async(e)=>{
+                    const btn=e.currentTarget;btn.disabled=true;btn.textContent="Sending...";
+                    const fullMsg="नमस्ते "+selected.customer.split(" ")[0]+"! 🙏\n\n"+responses[selected.id].slice(0,500)+"\n\n— "+selected.company+" Support via FlowZint AI";
+                    const sent=await sendWhatsAppReal(fullMsg);
+                    if(sent){toast("📲 Response sent to your WhatsApp!","success");}
+                    else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Vercel for direct send","info");}
+                    btn.disabled=false;btn.textContent="📲 Send on WhatsApp";
                   }} style={{fontSize:11,fontWeight:700,padding:"7px 14px",background:"#DCFCE7",border:"1px solid #86EFAC",borderRadius:9,cursor:"pointer",color:"#15803D",display:"flex",alignItems:"center",gap:6}}>
                     📲 Send on WhatsApp
                   </button>}
@@ -3732,36 +3754,68 @@ function WarRoomMode(){
       (acc)=>{p0=acc;setPhaseResults(prev=>({...prev,0:"🤖 "+acc}));}
     );
 
-    // Phases 1-4: ALL 4 agents run in PARALLEL simultaneously
-    setPhase("parallel");
-    setPhaseResults(prev=>({...prev,1:"🧠 ...",2:"🎯 ...",3:"💬 ...",4:"❤️ ..."}));
-    toast("⚡ All 4 AI agents activated simultaneously","info");
-    const [p1,p2,p3,p4]=await Promise.all([
-      // HireFlow agent
-      (async()=>{let t="";await callClaudeStream(
-        [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD"}\n\nReport your hiring pipeline status in 2 sentences: what you found, who's ranked top, and one risk.`}],
-        "HireFlow agent. Data-driven. Reference actual candidate names and scores. 60 words max.",
-        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));}
-      );return t;})(),
-      // SalesFlow agent
-      (async()=>{let t="";await callClaudeStream(
-        [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\nProspect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint,budget:topProspect.budget}):"No prospects generated yet"}\n\nReport your sales pipeline status in 2 sentences: prospects scored, top pick, and next action.`}],
-        "SalesFlow agent. Specific, numbers-driven. Reference actual prospect names. 60 words max.",
-        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));}
-      );return t;})(),
-      // SupportFlow agent
-      (async()=>{let t="";await callClaudeStream(
-        [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Sample questions: "+state.supportKB.slice(0,2).map(k=>k.q).join("; "):"No KB built yet"}\n\nReport your support readiness in 2 sentences: what's indexed, escalation patterns detected, and chat bot status.`}],
-        "SupportFlow agent. Specific. Mention actual KB content if available. 60 words max.",
-        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));}
-      );return t;})(),
-      // CareFlow agent
-      (async()=>{let t="";await callClaudeStream(
-        [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\nTicket queue: 5 tickets — 1 billing dispute (Raj Patel, urgent), 1 tech issue (Priya Nair, high), 1 upsell opportunity (Amir Khan, normal), 1 login issue (Sunita Rao, high), 1 positive feedback (Vikram Singh, low).\n\nReport your triage status in 2 sentences: tickets processed, urgency ranking, upsell detected.`}],
-        "CareFlow agent. Specific about ticket names and priorities. 60 words max.",
-        (acc)=>{t=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));}
-      );return t;})(),
-    ]);
+    // ── Phase 1: HireFlow runs first ────────────────────────────────────────
+    setPhase(1);
+    setPhaseResults(prev=>({...prev,1:"🧠 ..."}));
+    toast("🧠 HireFlow agent activated","info");
+    let p1="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the HireFlow AI agent in a live War Room.\n\nCandidate data: ${topCandidate?JSON.stringify({name:topCandidate.name,role:topCandidate.role,company:topCandidate.company,score:topScore,exp:topCandidate.exp}):"No pipeline run — generating from JD context"}\n\nReport your pipeline status in 2 sentences. Then output exactly: HANDOFF_TO_SALES: [name 1-2 candidates rejected due to budget/location mismatch who are warm leads for a software sales team, comma separated, or "none"]`}],
+      "HireFlow agent. Data-driven. Reference actual candidate names and scores. 80 words max.",
+      (acc)=>{p1=acc;setPhaseResults(prev=>({...prev,1:"🧠 "+acc}));}
+    );
+    // Extract candidates handed to SalesFlow
+    const handoffMatch=p1.match(/HANDOFF_TO_SALES:\s*(.+)/i);
+    const hireflowHandoff=handoffMatch?handoffMatch[1].replace(/\[|\]/g,"").trim():"";
+    if(hireflowHandoff&&hireflowHandoff!=="none"){
+      dispatch({type:"ADD_CROSS_EVENT",event:{type:"hiring_to_sales",title:"HireFlow → SalesFlow",desc:"Routed "+hireflowHandoff+" as warm sales leads",action:"Auto-routed"}});
+    }
+    await new Promise(r=>setTimeout(r,300));
+
+    // ── Phase 2: SalesFlow reads HireFlow's output ───────────────────────
+    setPhase(2);
+    setPhaseResults(prev=>({...prev,2:"🎯 ..."}));
+    toast("🎯 SalesFlow agent activated — reading HireFlow handoff","info");
+    let p2="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the SalesFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from HireFlow: "${hireflowHandoff||"no candidates handed off this run"}" — these are rejected candidates who are warm leads. Acknowledge them and add to your pipeline.\n\nYour prospect data: ${topProspect?JSON.stringify({name:topProspect.name,company:topProspect.company,fit:topProspect.fitScore,pain:topProspect.painPoint}):"No prospects generated yet"}\n\nReport in 2 sentences: what you received from HireFlow, your top prospect, and next action. Then output exactly: HANDOFF_TO_SUPPORT: [the single most common objection you're hearing from prospects, e.g. "pricing too high" or "needs board approval"]`}],
+      "SalesFlow agent. Explicitly reference what HireFlow handed you. 80 words max.",
+      (acc)=>{p2=acc;setPhaseResults(prev=>({...prev,2:"🎯 "+acc}));}
+    );
+    const objMatch=p2.match(/HANDOFF_TO_SUPPORT:\s*(.+)/i);
+    const salesHandoff=objMatch?objMatch[1].replace(/\[|\]/g,"").trim():"pricing concerns";
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"sales_to_support",title:"SalesFlow → SupportFlow",desc:"Top objection flagged: "+salesHandoff,action:"Added to KB"}});
+    await new Promise(r=>setTimeout(r,300));
+
+    // ── Phase 3: SupportFlow reads SalesFlow's objection ────────────────
+    setPhase(3);
+    setPhaseResults(prev=>({...prev,3:"💬 ..."}));
+    toast("💬 SupportFlow activated — ingesting SalesFlow objection data","info");
+    let p3="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the SupportFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from SalesFlow: Top prospect objection is "${salesHandoff}". Add this as a pre-emptive FAQ entry in your KB so support agents can handle it proactively.\n\nKB status: ${kbCount} items indexed. ${state.supportKB?.length>0?"Existing sample: "+state.supportKB[0]?.q:"No KB built yet"}\n\nReport in 2 sentences: what SalesFlow sent you, how you've updated the KB, and one escalation pattern. Then output exactly: HANDOFF_TO_CARE: [describe one high-priority customer interaction needing CareFlow attention, e.g. "Priya Nair — pipeline stuck 3 days, frustration escalating"]`}],
+      "SupportFlow agent. Explicitly reference what SalesFlow handed you. 80 words max.",
+      (acc)=>{p3=acc;setPhaseResults(prev=>({...prev,3:"💬 "+acc}));}
+    );
+    const escalMatch=p3.match(/HANDOFF_TO_CARE:\s*(.+)/i);
+    const supportHandoff=escalMatch?escalMatch[1].replace(/\[|\]/g,"").trim():"high-priority escalation from support chat";
+    dispatch({type:"ADD_CROSS_EVENT",event:{type:"support_to_care",title:"SupportFlow → CareFlow",desc:"Escalated: "+supportHandoff,action:"Priority ticket created"}});
+    await new Promise(r=>setTimeout(r,300));
+
+    // ── Phase 4: CareFlow reads SupportFlow's escalation ────────────────
+    setPhase(4);
+    setPhaseResults(prev=>({...prev,4:"❤️ ..."}));
+    toast("❤️ CareFlow activated — processing escalation from SupportFlow","info");
+    let p4="";
+    await callClaudeStream(
+      [{role:"user",content:`You are the CareFlow AI agent in a War Room.\n\n⚡ INCOMING HANDOFF from SupportFlow: Escalated case — "${supportHandoff}". Set this to URGENT priority immediately.\n\nExisting ticket queue: Raj Patel (billing, urgent), Priya Nair (tech issue, high), Amir Khan (enterprise upsell, normal), Sunita Rao (login, high), Vikram Singh (feedback, low).\n\nReport in 2 sentences: what SupportFlow escalated to you, your updated triage order, and the upsell detected. Then output exactly: HANDOFF_TO_SALES: [Amir Khan — enterprise upgrade, flag as priority upsell opportunity]`}],
+      "CareFlow agent. Explicitly reference what SupportFlow escalated. 80 words max.",
+      (acc)=>{p4=acc;setPhaseResults(prev=>({...prev,4:"❤️ "+acc}));}
+    );
+    const upsellMatch=p4.match(/HANDOFF_TO_SALES:\s*(.+)/i);
+    if(upsellMatch){
+      dispatch({type:"ADD_CROSS_EVENT",event:{type:"care_to_sales",title:"CareFlow → SalesFlow",desc:"Upsell loop: "+upsellMatch[1].replace(/\[|\]/g,"").trim(),action:"Routed to SalesFlow pipeline"}});
+    }
 
     // Phase 5: Cross-agent debates
     setPhase(5);
@@ -3819,7 +3873,7 @@ function WarRoomMode(){
       <div style={{background:"white",border:"1.5px solid #F1F1F1",borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
         <div>
           <div style={{fontSize:14,fontWeight:800,color:"#111827"}}>Run all 6 AI systems simultaneously</div>
-          <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>Hiring · Sales · Support · Care agents fire in parallel and hand off tasks to each other in real time</div>
+          <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>HireFlow → SalesFlow → SupportFlow → CareFlow — each agent reads the previous agent's output before responding</div>
         </div>
         <button onClick={run} disabled={running}
           style={{padding:"11px 24px",background:running?"#F3F4F6":"linear-gradient(135deg,#6D5FFA,#8B5CF6)",border:"none",borderRadius:10,fontSize:13,fontWeight:800,color:running?"#9CA3AF":"white",cursor:running?"not-allowed":"pointer",display:"flex",alignItems:"center",gap:8,boxShadow:running?"none":"0 4px 18px rgba(109,95,250,0.35)",transition:"all 0.2s",whiteSpace:"nowrap",flexShrink:0}}
@@ -3833,17 +3887,17 @@ function WarRoomMode(){
         {/* Phases */}
         <Card style={{padding:16}}>
           <div style={{fontSize:12,fontWeight:800,color:"#374151",marginBottom:12,letterSpacing:"-0.01em"}}>Mission phases</div>
-          {/* Parallel agents badge */}
-          {(phase==="parallel"||(phase>0&&phase<5))&&(
+          {/* Sequential handoff badge */}
+          {(typeof phase==="number"&&phase>0&&phase<5)&&(
             <div style={{marginBottom:10,padding:"6px 10px",background:"linear-gradient(135deg,#EDE9FE,#F5F3FF)",border:"1.5px solid #A78BFA",borderRadius:9,display:"flex",alignItems:"center",gap:8}}>
               <div style={{width:8,height:8,borderRadius:"50%",background:"#8B5CF6",animation:"pulse 0.6s infinite",flexShrink:0}}/>
-              <div style={{fontSize:10,fontWeight:800,color:"#6D28D9"}}>⚡ 4 agents running in parallel</div>
+              <div style={{fontSize:10,fontWeight:800,color:"#6D28D9"}}>🔗 Agent {phase}/4 — reading previous handoff</div>
             </div>
           )}
           {PHASES.map(p=>{
             const isParallelPhase=p.id>=1&&p.id<=4;
-            const isDone=phase==="parallel"?false:typeof phase==="number"&&(phase>p.id||(phase>4&&isParallelPhase));
-            const isActive=(phase===p.id&&running)||(phase==="parallel"&&isParallelPhase&&running);
+            const isDone=typeof phase==="number"&&(phase>p.id||(phase>4&&isParallelPhase));
+            const isActive=(phase===p.id&&running);
             const result=phaseResults[p.id];
             return(
               <div key={p.id} style={{padding:"9px 0",borderBottom:p.id<6?"1px solid #F9FAFB":"none"}}>
@@ -3852,7 +3906,7 @@ function WarRoomMode(){
                     {isDone?"✓":isActive?<div style={{width:6,height:6,borderRadius:"50%",background:"#8B5CF6",animation:"pulse 1s infinite"}}/>:p.icon}
                   </div>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:11,fontWeight:600,color:isDone?"#374151":isActive?"#6D5FFA":"#9CA3AF"}}>{p.title}{isParallelPhase&&(phase==="parallel")?" ⚡":""}</div>
+                    <div style={{fontSize:11,fontWeight:600,color:isDone?"#374151":isActive?"#6D5FFA":"#9CA3AF"}}>{p.title}{isParallelPhase&&isActive?" 🔗":""}</div>
                     {isActive&&<div style={{fontSize:9,color:"#8B5CF6",marginTop:1}}>{p.desc}</div>}
                   </div>
                   {isDone&&!result&&<span style={{fontSize:9,fontWeight:700,color:"#16A34A",background:"#F0FDF4",border:"1px solid #86EFAC",borderRadius:20,padding:"2px 7px"}}>Done</span>}

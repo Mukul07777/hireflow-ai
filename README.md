@@ -60,7 +60,11 @@ VITE_GROQ_API_KEY_2=your_second_key
 VITE_GROQ_API_KEY_3=your_third_key
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_CALLMEBOT_PHONE=+91XXXXXXXXXX
+VITE_CALLMEBOT_APIKEY=your_callmebot_key
 ```
+
+WhatsApp setup (CallMeBot — free): send `I allow callmebot to send me messages` to +34 644 59 97 91 on WhatsApp. CallMeBot replies with your API key. Add your number + that key to Vercel. Without these, WhatsApp buttons fall back to wa.me deep links.
 
 Never commit .env — keys live in Vercel env vars only.
 
