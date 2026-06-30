@@ -595,6 +595,31 @@ function AgentNetworkViz({crossEvents=[],onNodeClick}){
 
 function HomeScreen(){
   const{state,dispatch}=useStore();
+  const toast=useToast();
+  const[demoRunning,setDemoRunning]=useState(false);
+
+  const runAutoDemo=async()=>{
+    setDemoRunning(true);
+    const step=(msg,delay=1800)=>new Promise(r=>{toast(msg,"info");setTimeout(r,delay);});
+
+    // 1. Pre-fill all sample data silently
+    dispatch({type:"SET_JD",payload:SAMPLE_JD});
+    dispatch({type:"SET_SALES_PRODUCT",payload:SAMPLE_PRODUCT});
+    dispatch({type:"SET_SALES_TARGET",payload:SAMPLE_TARGET});
+    dispatch({type:"SET_SUPPORT_DOCS",payload:SAMPLE_DOCS});
+    dispatch({type:"SET_SMB_PROFILE",payload:{name:SAMPLE_SMB.name,type:SAMPLE_SMB.type,city:SAMPLE_SMB.city}});
+
+    await step("🎬 Auto-Demo starting — loading all sample data...",1200);
+    await step("🏪 Step 1: SMB Brain — Kirana King's WhatsApp data loaded",1400);
+    dispatch({type:"SET_MODE",payload:"smb"});
+    await step("🧠 Step 2: HireFlow — Sample JD & 5 candidates loaded. Pipeline ready.",1400);
+    dispatch({type:"SET_MODE",payload:"hiring"});
+    await step("🎯 Step 3: SalesFlow — FlowZint AI product + Indian B2B target loaded.",1400);
+    dispatch({type:"SET_MODE",payload:"sales"});
+    await step("⚡ Step 4: War Room — All agents briefed. Click Activate to watch them debate!",1600);
+    dispatch({type:"SET_MODE",payload:"warroom"});
+    setDemoRunning(false);
+  };
 
   const modes=[
     {id:"hiring",icon:"🧠",title:"HireFlow AI",sub:"Hiring Intelligence",desc:"7 AI agents rank resumes, draft outreach emails, generate interview questions and audit bias — from a single JD paste.",color:"#6D5FFA",glow:"rgba(109,95,250,0.18)",chip:"7 agents · real scoring · bias audit"},
@@ -623,7 +648,7 @@ function HomeScreen(){
         <div style={{position:"absolute",top:40,right:"8%",width:280,height:280,borderRadius:"50%",background:"radial-gradient(circle,rgba(244,63,94,0.1) 0%,transparent 70%)",pointerEvents:"none"}}/>
 
         {/* Nav */}
-        <div style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:22,position:"relative",zIndex:2}}>
+        <div className="hero-nav" style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:22,position:"relative",zIndex:2}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 0 20px rgba(109,95,250,0.5)"}}>⚡</div>
             <div>
@@ -631,7 +656,7 @@ function HomeScreen(){
               <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",fontWeight:500}}>Multi-Agent Platform</div>
             </div>
           </div>
-          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+          <div className="hero-nav-buttons" style={{display:"flex",gap:10,alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:22,padding:"6px 14px"}}>
               <div style={{width:6,height:6,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px rgba(34,197,94,0.25)",animation:"pulse 2s infinite"}}/>
               <span style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.7)",letterSpacing:"0.06em"}}>ALL SYSTEMS ONLINE</span>
@@ -697,18 +722,25 @@ function HomeScreen(){
               </div>
             </div>
             {/* Primary CTA */}
-            <div style={{display:"flex",gap:12,justifyContent:"center"}}>
+            <div className="hero-ctas" style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
+              {/* AUTO-DEMO — the big one */}
+              <button onClick={runAutoDemo} disabled={demoRunning}
+                style={{padding:"13px 28px",background:demoRunning?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#F59E0B,#EF4444,#8B5CF6)",backgroundSize:"200% 200%",animation:demoRunning?"none":"gradient-shift 3s ease infinite",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:demoRunning?"not-allowed":"pointer",boxShadow:demoRunning?"none":"0 0 40px rgba(245,158,11,0.5)",transition:"all 0.2s",display:"flex",alignItems:"center",gap:8}}
+                onMouseEnter={e=>{if(!demoRunning){e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 0 56px rgba(245,158,11,0.7)";}}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=demoRunning?"none":"0 0 40px rgba(245,158,11,0.5)";}}>
+                {demoRunning?<><Spinner color="white"/>Loading demo...</>:"▶ Auto-Demo — see everything in 8 seconds"}
+              </button>
               <button onClick={()=>dispatch({type:"SET_MODE",payload:"smb"})}
-                style={{padding:"13px 28px",background:"linear-gradient(135deg,#8B5CF6,#6D5FFA)",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:"pointer",boxShadow:"0 0 32px rgba(139,92,246,0.45)",transition:"all 0.2s"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 0 48px rgba(139,92,246,0.65)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 0 32px rgba(139,92,246,0.45)";}}>
-                🏪 Start with SMB Brain →
+                style={{padding:"13px 24px",background:"linear-gradient(135deg,#8B5CF6,#6D5FFA)",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:"pointer",boxShadow:"0 0 32px rgba(139,92,246,0.45)",transition:"all 0.2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";}}>
+                🏪 SMB Brain →
               </button>
               <button onClick={()=>dispatch({type:"SET_MODE",payload:"warroom"})}
-                style={{padding:"13px 28px",background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:12,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.85)",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(14,165,233,0.6)";e.currentTarget.style.color="white";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(255,255,255,0.18)";e.currentTarget.style.color="rgba(255,255,255,0.85)";}}>
-                ⚡ Skip to War Room
+                style={{padding:"13px 24px",background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:12,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.85)",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(14,165,233,0.6)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(255,255,255,0.18)";}}>
+                ⚡ War Room
               </button>
             </div>
           </motion.div>
@@ -2242,6 +2274,9 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
                 <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#1C1C1A"}}>{c.name}</div>
                   {verdict&&<span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:20,background:score>=80?"#EEEDFE":score>=60?"#FAEEDA":"#FAECE7",color:scoreColor}}>{verdict}</span>}
+                  {state.candidateDecisions[c.id]==="warm_lead"&&<span style={{fontSize:9,fontWeight:800,padding:"2px 8px",borderRadius:20,background:"#FEF3C7",color:"#B45309",border:"1px solid #FDE68A",animation:"pulse 2s infinite"}}>⚡ Warm Lead — War Room</span>}
+                  {state.candidateDecisions[c.id]==="hired"&&<span style={{fontSize:9,fontWeight:800,padding:"2px 8px",borderRadius:20,background:"#D1FAE5",color:"#065F46"}}>✅ Hired</span>}
+                  {state.candidateDecisions[c.id]==="rejected"&&<span style={{fontSize:9,fontWeight:800,padding:"2px 8px",borderRadius:20,background:"#FEE2E2",color:"#991B1B"}}>✕ Rejected</span>}
                 </div>
                 <div style={{fontSize:11,color:"#888780",marginTop:1}}>{c.role}{c.company?" · "+c.company:""}{c.city||c.parsedCity?" · "+(c.city||c.parsedCity):""}</div>
                 <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:5}}>
@@ -3719,7 +3754,20 @@ function WarRoomMode(){
   const[voiceEnabled,setVoiceEnabled]=useState(false);
   const[lastRun,setLastRun]=useState(null);
   useEffect(()=>{setTTSEnabled(voiceEnabled);},[voiceEnabled]);
-  useEffect(()=>{try{const s=localStorage.getItem("flowzint_last_warroom");if(s)setLastRun(JSON.parse(s));}catch{}},[]);
+  useEffect(()=>{
+    // Try Supabase first, fall back to localStorage
+    const loadMemory=async()=>{
+      try{
+        const {dbSelect,DB_READY}=await import("./lib/supabase.js");
+        if(DB_READY){
+          const rows=await dbSelect("war_room_sessions",{},"created_at.desc",1);
+          if(rows&&rows.length>0){setLastRun({date:new Date(rows[0].created_at).toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}),summary:rows[0].summary,candidates:rows[0].candidates,prospects:rows[0].prospects});return;}
+        }
+      }catch{}
+      try{const s=localStorage.getItem("flowzint_last_warroom");if(s)setLastRun(JSON.parse(s));}catch{}
+    };
+    loadMemory();
+  },[]);
   const exportPDF=()=>{
     const summary=(phaseResults[6]||"").replace(/^📋\s*/,"");
     const candidates=state.activeCandidates?.length||0;
@@ -3839,6 +3887,19 @@ function WarRoomMode(){
     finishDebate(res1id,resolve1);
     speak("HireFlow responds: "+resolve1);
     dispatch({type:"ADD_CROSS_EVENT",event:{type:"agent_resolution",title:"✅ HireFlow resolves dispute",desc:resolve1.slice(0,80),action:"Decision updated"}});
+    // ── REAL STATE CHANGE: find disputed candidate and mark as warm_lead ──
+    {
+      const allNames=(state.activeCandidates||[]).map(c=>c.name);
+      const disputedName=allNames.find(n=>dispute1.toLowerCase().includes(n.split(" ")[0].toLowerCase())||dispute1.toLowerCase().includes(n.toLowerCase()));
+      if(disputedName){
+        const found=(state.activeCandidates||[]).find(c=>c.name===disputedName);
+        if(found){
+          dispatch({type:"SET_CANDIDATE_DECISION",id:found.id,decision:"warm_lead"});
+          toast(`⚔️ War Room: ${disputedName} → Warm Lead (SalesFlow overruled HireFlow)`,"success");
+          dispatch({type:"ADD_CROSS_EVENT",event:{type:"state_change",title:"🔄 "+disputedName+" status changed",desc:"HireFlow rejected → SalesFlow claimed as Warm Lead",action:"HireFlow candidate list updated"}});
+        }
+      }
+    }
     await new Promise(r=>setTimeout(r,300));
 
     // ── Phase 2: SalesFlow reads HireFlow's output ───────────────────────
@@ -3956,14 +4017,23 @@ function WarRoomMode(){
     setRunning(false);
     toast("War Room complete — unified report ready","success");
     speak("War Room complete. "+p6.slice(0,200));
-    // Save session memory to localStorage
+    // Save session memory — Supabase first, localStorage fallback
+    const sessionData={
+      summary:p6.replace(/^📋\s*/,""),
+      candidates:state.activeCandidates?.length||0,
+      prospects:state.salesProspects?.length||0,
+      kb_items:state.supportKB?.length||0,
+      cross_events:state.crossEvents?.length||0,
+      handoffs_count:debates.length,
+    };
+    try{
+      const {dbInsert,DB_READY}=await import("./lib/supabase.js");
+      if(DB_READY)await dbInsert("war_room_sessions",sessionData);
+    }catch{}
     try{
       localStorage.setItem("flowzint_last_warroom",JSON.stringify({
         date:new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"}),
-        summary:p6.replace(/^📋\s*/,""),
-        candidates:state.activeCandidates?.length||0,
-        prospects:state.salesProspects?.length||0,
-        crossEvents:state.crossEvents?.length||0,
+        ...sessionData,
       }));
     }catch{}
   };
@@ -4023,7 +4093,7 @@ function WarRoomMode(){
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:14,marginBottom:14}}>
+      <div className="warroom-grid" style={{display:"grid",gridTemplateColumns:"280px 1fr",gap:14,marginBottom:14}}>
         {/* Phases */}
         <Card style={{padding:16}}>
           <div style={{fontSize:12,fontWeight:800,color:"#374151",marginBottom:12,letterSpacing:"-0.01em"}}>Mission phases</div>
@@ -4127,7 +4197,7 @@ function WarRoomMode(){
         <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}}>
           <Card style={{padding:20}}>
             <div style={{fontSize:13,fontWeight:800,color:"#111827",marginBottom:14}}>Command report — all systems complete</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:12}}>
+            <div className="command-report-grid" style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:12}}>
               {[
                 {icon:"🧠",label:"HireFlow",v:state.pipelineState==="done"?"Done":"—",d:state.activeCandidates?.length?state.activeCandidates.length+" shortlisted":"Run pipeline first"},
                 {icon:"🎯",label:"SalesFlow",v:state.salesProspects?.length>0?"Done":"—",d:state.salesProspects?.length>0?state.salesProspects.length+" prospects":"Run SalesFlow first"},
@@ -4258,15 +4328,101 @@ function HiringHistory(){
 // ── APP SHELL ─────────────────────────────────────────────────────────────
 const HIRING_NAV=[{id:"dashboard",label:"Dashboard",icon:"⊞"},{id:"pipeline",label:"Pipeline",icon:"▶"},{id:"candidates",label:"Candidates",icon:"👥"},{id:"outreach",label:"Outreach",icon:"✉️"},{id:"interviews",label:"Interviews",icon:"💬"},{id:"report",label:"Report",icon:"📄"},{id:"history",label:"History",icon:"🕐"}];
 const HIRING_PAGES={dashboard:HiringDashboard,pipeline:HiringPipeline,candidates:HiringCandidates,outreach:HiringOutreach,interviews:HiringInterviews,report:HiringReport,history:HiringHistory};
-const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}@keyframes voicePulse{0%,100%{box-shadow:0 0 0 3px rgba(239,68,68,0.3)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0.15)}}.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}@media(max-width:1100px){.home-grid{grid-template-columns:repeat(2,1fr)!important;}.care-grid{grid-template-columns:1fr!important;}.support-grid{grid-template-columns:1fr!important;}.hiring-layout{flex-direction:column!important;}}@media(max-width:768px){.home-grid{grid-template-columns:1fr!important;}.hero-h1{font-size:36px!important;}.hero-p{font-size:14px!important;}.mode-cards-section{padding:32px 16px!important;}.hero-section{padding:0 16px 40px!important;}.guided-path{flex-wrap:wrap!important;gap:8px!important;}.proof-pills{flex-direction:column!important;align-items:center!important;}}";
+const GLOBAL_STYLES=`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}
+@keyframes voicePulse{0%,100%{box-shadow:0 0 0 3px rgba(239,68,68,0.3)}50%{box-shadow:0 0 0 6px rgba(239,68,68,0.15)}}
+@keyframes gradient-shift{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}
+
+/* ── TABLET ── */
+@media(max-width:1100px){
+  .home-grid{grid-template-columns:repeat(2,1fr)!important;}
+  .care-grid{grid-template-columns:1fr!important;}
+  .support-grid{grid-template-columns:1fr!important;}
+  .hiring-layout{flex-direction:column!important;}
+  .warroom-grid{grid-template-columns:1fr!important;}
+  .command-report-grid{grid-template-columns:repeat(2,1fr)!important;}
+}
+
+/* ── MOBILE ── */
+@media(max-width:768px){
+  /* Hero */
+  .hero-h1{font-size:30px!important;line-height:1.15!important;}
+  .hero-section{padding:0 16px 32px!important;}
+  .hero-nav{padding:14px 16px!important;flex-wrap:wrap!important;gap:8px!important;}
+  .hero-nav-buttons{gap:6px!important;flex-wrap:wrap!important;}
+  .hero-nav-buttons button{padding:5px 10px!important;font-size:10px!important;}
+  .hero-ctas{flex-direction:column!important;align-items:stretch!important;gap:8px!important;}
+  .hero-ctas button{width:100%!important;text-align:center!important;justify-content:center!important;}
+
+  /* Home grid */
+  .home-grid{grid-template-columns:1fr!important;}
+  .proof-pills{flex-direction:column!important;align-items:stretch!important;gap:8px!important;}
+  .guided-path-steps{flex-wrap:wrap!important;gap:6px!important;justify-content:center!important;}
+  .guided-path-strip{padding:12px 14px!important;margin:0 0 12px!important;}
+
+  /* Mode page shell */
+  .mode-shell{flex-direction:column!important;}
+  .mode-sidebar{width:100%!important;max-height:52px!important;overflow:hidden!important;flex-direction:row!important;border-right:none!important;border-bottom:1px solid #EEECEA!important;}
+  .mode-sidebar.open{max-height:none!important;flex-direction:column!important;}
+  .page-content{padding:16px!important;}
+
+  /* HireFlow */
+  .hiring-shell{flex-direction:column!important;height:auto!important;min-height:100vh!important;}
+  .hiring-aside{width:100%!important;height:auto!important;flex-direction:row!important;overflow-x:auto!important;border-right:none!important;border-bottom:1px solid #EEECEA!important;padding:8px!important;}
+  .hiring-nav-item{padding:6px 10px!important;font-size:10px!important;white-space:nowrap!important;flex-direction:row!important;gap:4px!important;}
+  .hiring-main{padding:16px!important;}
+  .candidate-grid{grid-template-columns:1fr!important;}
+  .bias-grid{grid-template-columns:1fr!important;}
+
+  /* War Room */
+  .warroom-grid{grid-template-columns:1fr!important;}
+  .command-report-grid{grid-template-columns:repeat(2,1fr)!important;}
+  .command-roi-grid{grid-template-columns:1fr!important;}
+  .warroom-launch-bar{flex-direction:column!important;gap:10px!important;align-items:stretch!important;}
+  .warroom-launch-buttons{flex-wrap:wrap!important;gap:8px!important;}
+  .warroom-launch-buttons button{flex:1!important;justify-content:center!important;}
+
+  /* SalesFlow */
+  .sales-tabs{overflow-x:auto!important;-webkit-overflow-scrolling:touch!important;}
+  .prospect-card-buttons{flex-wrap:wrap!important;gap:4px!important;}
+
+  /* SupportFlow */
+  .support-layout{flex-direction:column!important;}
+
+  /* CareFlow */
+  .care-layout{flex-direction:column!important;}
+  .care-ticket-list{max-height:240px!important;}
+
+  /* Agent Network */
+  .agent-network svg{width:100%!important;height:auto!important;}
+
+  /* General */
+  .modal-overlay .modal-box{max-width:95vw!important;margin:10px!important;}
+  .page-header{flex-direction:column!important;gap:8px!important;align-items:flex-start!important;}
+}
+
+/* ── SMALL MOBILE ── */
+@media(max-width:420px){
+  .hero-h1{font-size:24px!important;}
+  .command-report-grid{grid-template-columns:1fr!important;}
+}
+`;
 
 function HiringShell(){
   const{state,dispatch}=useStore();
   const done=state.pipelineState==="done";
   const Page=HIRING_PAGES[state.activeNav]||HiringDashboard;
   return(
-    <div style={{display:"flex",height:"100vh",background:"#F7F6F3",overflow:"hidden"}}>
-      <aside style={{width:state.sidebarOpen?216:52,background:"white",borderRight:"1px solid #EEECEA",display:"flex",flexDirection:"column",transition:"width 0.25s",overflow:"hidden",flexShrink:0}}>
+    <div className="hiring-shell" style={{display:"flex",height:"100vh",background:"#F7F6F3",overflow:"hidden"}}>
+      <aside className="hiring-aside" style={{width:state.sidebarOpen?216:52,background:"white",borderRight:"1px solid #EEECEA",display:"flex",flexDirection:"column",transition:"width 0.25s",overflow:"hidden",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"14px 10px",borderBottom:"1px solid #EEECEA"}}>
           <div style={{width:28,height:28,background:"linear-gradient(135deg,#534AB7,#7F77DD)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🧠</div>
           {state.sidebarOpen&&<div style={{flex:1}}><div style={{fontSize:11,fontWeight:800,color:"#1C1C1A"}}>HireFlow AI</div><button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{fontSize:10,color:"#534AB7",background:"none",border:"none",cursor:"pointer",padding:0}}>back to all modes</button></div>}

@@ -98,5 +98,19 @@ src/
     supabase.js            # pure fetch Supabase client
 ```
 
+**Supabase table for War Room memory** (run in Supabase SQL editor):
+```sql
+create table war_room_sessions (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  summary text,
+  candidates int default 0,
+  prospects int default 0,
+  kb_items int default 0,
+  cross_events int default 0,
+  handoffs_count int default 0
+);
+```
+
 State: single useReducer at root. AI: module-level callClaude() and callClaudeStream() with round-robin key rotation.
 
