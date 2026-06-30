@@ -397,7 +397,7 @@ function HomeScreen(){
           </motion.div>
 
           <motion.h1 initial={{opacity:0,y:22}} animate={{opacity:1,y:0}} transition={{duration:0.55,delay:0.08}}
-            style={{fontSize:58,fontWeight:900,lineHeight:1.06,letterSpacing:"-0.035em",color:"white",marginBottom:20,maxWidth:740,margin:"0 auto 20px"}}>
+            className="hero-h1" style={{fontSize:58,fontWeight:900,lineHeight:1.06,letterSpacing:"-0.035em",color:"white",marginBottom:20,maxWidth:740,margin:"0 auto 20px"}}>
             Six AI agents.<br/>
             <span style={{background:"linear-gradient(90deg,#6D5FFA,#A78BFA,#60A5FA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>One platform.</span>
           </motion.h1>
@@ -407,21 +407,43 @@ function HomeScreen(){
             Hiring, sales, support, care, SMB intelligence, and a live agent War Room — all running simultaneously, all powered by real AI.
           </motion.p>
 
-          {/* CTAs */}
+          {/* Guided path */}
           <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{duration:0.44,delay:0.24}}
-            style={{display:"flex",gap:12,justifyContent:"center",marginBottom:56}}>
-            <button onClick={()=>dispatch({type:"SET_MODE",payload:"hiring"})}
-              style={{padding:"13px 28px",background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:"pointer",boxShadow:"0 0 32px rgba(109,95,250,0.45)",transition:"all 0.2s"}}
-              onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 0 48px rgba(109,95,250,0.65)";}}
-              onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 0 32px rgba(109,95,250,0.45)";}}>
-              🧠 Start with HireFlow →
-            </button>
-            <button onClick={()=>dispatch({type:"SET_MODE",payload:"warroom"})}
-              style={{padding:"13px 28px",background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:12,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.85)",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
-              onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(109,95,250,0.6)";e.currentTarget.style.color="white";}}
-              onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(255,255,255,0.18)";e.currentTarget.style.color="rgba(255,255,255,0.85)";}}>
-              ⚡ Launch War Room
-            </button>
+            style={{marginBottom:40}}>
+            {/* "Best demo path" strip */}
+            <div style={{background:"rgba(139,92,246,0.12)",border:"1.5px solid rgba(139,92,246,0.35)",borderRadius:14,padding:"14px 22px",marginBottom:16,maxWidth:640,margin:"0 auto 16px"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#A78BFA",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>✦ Best demo path — follow in order</div>
+              <div style={{display:"flex",alignItems:"center",gap:0,flexWrap:"wrap",justifyContent:"center"}}>
+                {[{step:1,icon:"🏪",label:"SMB Brain",id:"smb",color:"#8B5CF6"},{step:2,icon:"🎯",label:"SalesFlow",id:"sales",color:"#F59E0B"},{step:3,icon:"❤️",label:"CareFlow",id:"care",color:"#F43F5E"},{step:4,icon:"⚡",label:"War Room",id:"warroom",color:"#0EA5E9"}].map((s,i,arr)=>(
+                  <div key={s.id} style={{display:"flex",alignItems:"center",gap:0}}>
+                    <button onClick={()=>dispatch({type:"SET_MODE",payload:s.id})}
+                      style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,padding:"7px 14px",cursor:"pointer",transition:"all 0.15s",fontSize:12,fontWeight:700,color:"white"}}
+                      onMouseEnter={e=>{e.currentTarget.style.background=s.color+"30";e.currentTarget.style.borderColor=s.color+"80";}}
+                      onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.08)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";}}>
+                      <span style={{fontSize:10,fontWeight:900,color:s.color,background:s.color+"20",borderRadius:"50%",width:18,height:18,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{s.step}</span>
+                      <span>{s.icon}</span>
+                      <span>{s.label}</span>
+                    </button>
+                    {i<arr.length-1&&<div style={{color:"rgba(255,255,255,0.25)",fontSize:14,padding:"0 4px"}}>→</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Primary CTA */}
+            <div style={{display:"flex",gap:12,justifyContent:"center"}}>
+              <button onClick={()=>dispatch({type:"SET_MODE",payload:"smb"})}
+                style={{padding:"13px 28px",background:"linear-gradient(135deg,#8B5CF6,#6D5FFA)",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:"pointer",boxShadow:"0 0 32px rgba(139,92,246,0.45)",transition:"all 0.2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 0 48px rgba(139,92,246,0.65)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="0 0 32px rgba(139,92,246,0.45)";}}>
+                🏪 Start with SMB Brain →
+              </button>
+              <button onClick={()=>dispatch({type:"SET_MODE",payload:"warroom"})}
+                style={{padding:"13px 28px",background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:12,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.85)",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(14,165,233,0.6)";e.currentTarget.style.color="white";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(255,255,255,0.18)";e.currentTarget.style.color="rgba(255,255,255,0.85)";}}>
+                ⚡ Skip to War Room
+              </button>
+            </div>
           </motion.div>
 
           {/* Proof pills */}
@@ -441,7 +463,7 @@ function HomeScreen(){
       </div>
 
       {/* ── MODE CARDS ──────────────────────────────────────── */}
-      <div style={{background:"#FAFAFA",borderTop:"1px solid rgba(255,255,255,0.06)",padding:"56px 28px 48px"}}>
+      <div className="mode-cards-section" style={{background:"#FAFAFA",borderTop:"1px solid rgba(255,255,255,0.06)",padding:"56px 28px 48px"}}>
         <div style={{maxWidth:1080,margin:"0 auto"}}>
           <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{duration:0.4,delay:0.28}}
             style={{textAlign:"center",marginBottom:40}}>
@@ -449,17 +471,18 @@ function HomeScreen(){
             <div style={{fontSize:28,fontWeight:900,color:"#111827",letterSpacing:"-0.025em"}}>6 AI systems. Pick one to start.</div>
           </motion.div>
 
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
-            {modes.map((m,i)=>(
+          <div className="home-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+            {modes.map((m,i)=>{const isStart=m.id==="smb";return(
               <motion.div key={m.id}
                 initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}
                 transition={{duration:0.4,delay:0.08+i*0.06}}
                 onClick={()=>dispatch({type:"SET_MODE",payload:m.id})}
-                style={{background:"white",borderRadius:16,border:"1.5px solid #F1F1F1",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}
+                style={{background:"white",borderRadius:16,border:isStart?"2px solid #8B5CF6":"1.5px solid #F1F1F1",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:isStart?"0 4px 24px rgba(139,92,246,0.18)":"0 2px 8px rgba(0,0,0,0.04)"}}
                 whileHover={{y:-5,boxShadow:`0 16px 40px ${m.glow}`,borderColor:m.color+"55"}}>
 
                 {/* Left color bar */}
                 <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:m.color,borderRadius:"16px 0 0 16px",opacity:0.7}}/>
+                {isStart&&<div style={{position:"absolute",top:12,right:12,background:"linear-gradient(135deg,#8B5CF6,#6D5FFA)",color:"white",fontSize:9,fontWeight:900,padding:"3px 9px",borderRadius:20,letterSpacing:"0.06em"}}>START HERE</div>}
 
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,paddingLeft:8}}>
                   <div style={{width:44,height:44,borderRadius:12,background:m.color+"14",border:`1.5px solid ${m.color}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
@@ -478,8 +501,7 @@ function HomeScreen(){
                   <div style={{width:28,height:28,borderRadius:8,background:m.color+"14",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:m.color,fontWeight:800,flexShrink:0}}>→</div>
                 </div>
               </motion.div>
-            ))}
-          </div>
+            );})}
         </div>
       </div>
 
@@ -2963,14 +2985,61 @@ function CareMode(){
     return Math.min(99,base+prioBoost+catBoost);
   };
 
+  const[showNewTicket,setShowNewTicket]=useState(false);
+  const[newTicket,setNewTicket]=useState({customer:"",company:"",subject:"",message:"",priority:"normal",category:"technical"});
+
+  const addTicket=()=>{
+    if(!newTicket.customer.trim()||!newTicket.message.trim()){toast("Fill in customer name and message","error");return;}
+    const sentiment=newTicket.message.toLowerCase().match(/angry|fraud|pathetic|worst|refund|upset|terrible/)? -0.7:
+                    newTicket.message.toLowerCase().match(/urgent|asap|immediately|stuck|broken/)? -0.4:
+                    newTicket.message.toLowerCase().match(/love|great|amazing|thanks|upgrade|interested/)? 0.7 : -0.1;
+    const t={id:Date.now(),customer:newTicket.customer,company:newTicket.company||"Customer",email:(newTicket.customer.toLowerCase().replace(" ",".")+"@gmail.com"),subject:newTicket.subject||"Support request",message:newTicket.message,priority:newTicket.priority,category:newTicket.category,sentiment,city:"India",createdAt:Date.now()};
+    setTickets(prev=>[t,...prev]);
+    setSelected(t);
+    setNewTicket({customer:"",company:"",subject:"",message:"",priority:"normal",category:"technical"});
+    setShowNewTicket(false);
+    toast("Ticket created — AI will auto-triage","success");
+  };
+
   return(
     <div style={{display:"grid",gridTemplateColumns:"330px 1fr",gap:16}}>
+      {/* New Ticket Modal */}
+      {showNewTicket&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(28,28,26,0.55)",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center",padding:24,backdropFilter:"blur(3px)"}} onClick={e=>e.target===e.currentTarget&&setShowNewTicket(false)}>
+          <div style={{background:"white",borderRadius:18,width:"100%",maxWidth:480,boxShadow:"0 24px 64px rgba(0,0,0,0.22)",overflow:"hidden"}}>
+            <div style={{background:"linear-gradient(135deg,#D4537E,#F43F5E)",padding:"16px 22px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:14,fontWeight:800,color:"white"}}>+ New Support Ticket</div>
+              <button onClick={()=>setShowNewTicket(false)} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",color:"white",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+            </div>
+            <div style={{padding:20,display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:5}}>Customer Name *</div><input value={newTicket.customer} onChange={e=>setNewTicket(p=>({...p,customer:e.target.value}))} placeholder="Raj Patel" style={{width:"100%",border:"1px solid #EEECEA",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/></div>
+                <div><div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:5}}>Company</div><input value={newTicket.company} onChange={e=>setNewTicket(p=>({...p,company:e.target.value}))} placeholder="UrbanCart" style={{width:"100%",border:"1px solid #EEECEA",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/></div>
+              </div>
+              <div><div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:5}}>Subject</div><input value={newTicket.subject} onChange={e=>setNewTicket(p=>({...p,subject:e.target.value}))} placeholder="What's the issue about?" style={{width:"100%",border:"1px solid #EEECEA",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/></div>
+              <div><div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:5}}>Message *</div><textarea value={newTicket.message} onChange={e=>setNewTicket(p=>({...p,message:e.target.value}))} placeholder="Paste the customer's message here..." rows={4} style={{width:"100%",border:"1px solid #EEECEA",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none",resize:"none",boxSizing:"border-box"}}/></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div><div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:5}}>Priority</div>
+                  <select value={newTicket.priority} onChange={e=>setNewTicket(p=>({...p,priority:e.target.value}))} style={{width:"100%",border:"1px solid #EEECEA",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none",background:"white"}}>
+                    <option value="urgent">🚨 Urgent</option><option value="high">🔴 High</option><option value="normal">🟡 Normal</option><option value="low">🟢 Low</option>
+                  </select></div>
+                <div><div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:5}}>Category</div>
+                  <select value={newTicket.category} onChange={e=>setNewTicket(p=>({...p,category:e.target.value}))} style={{width:"100%",border:"1px solid #EEECEA",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none",background:"white"}}>
+                    <option value="billing">💳 Billing</option><option value="technical">🔧 Technical</option><option value="sales">💼 Sales</option><option value="feedback">⭐ Feedback</option><option value="refund">💰 Refund</option>
+                  </select></div>
+              </div>
+              <Btn variant="pink" onClick={addTicket} fullWidth>Create Ticket — AI will triage</Btn>
+            </div>
+          </div>
+        </div>
+      )}
       <div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A"}}>{tickets.length} tickets</div>
           <div style={{display:"flex",gap:6}}>
             <Tag color="danger">{tickets.filter(t=>t.priority==="urgent").length} urgent</Tag>
             <Tag color="warn">{tickets.filter(t=>!approved[t.id]).length} pending</Tag>
+            <button onClick={()=>setShowNewTicket(true)} style={{fontSize:11,fontWeight:700,padding:"4px 11px",borderRadius:8,background:"linear-gradient(135deg,#D4537E,#F43F5E)",color:"white",border:"none",cursor:"pointer"}}>+ New</button>
           </div>
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
@@ -3713,7 +3782,7 @@ function HiringHistory(){
 // ── APP SHELL ─────────────────────────────────────────────────────────────
 const HIRING_NAV=[{id:"dashboard",label:"Dashboard",icon:"⊞"},{id:"pipeline",label:"Pipeline",icon:"▶"},{id:"candidates",label:"Candidates",icon:"👥"},{id:"outreach",label:"Outreach",icon:"✉️"},{id:"interviews",label:"Interviews",icon:"💬"},{id:"report",label:"Report",icon:"📄"},{id:"history",label:"History",icon:"🕐"}];
 const HIRING_PAGES={dashboard:HiringDashboard,pipeline:HiringPipeline,candidates:HiringCandidates,outreach:HiringOutreach,interviews:HiringInterviews,report:HiringReport,history:HiringHistory};
-const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}";
+const GLOBAL_STYLES="@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Inter,system-ui,sans-serif;}@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}@keyframes shimmer{0%{background-position:-400px 0}100%{background-position:400px 0}}.shimmer{background:linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 37%,#F3F4F6 63%);background-size:400px 100%;animation:shimmer 1.4s ease infinite;border-radius:6px;}@media(max-width:1100px){.home-grid{grid-template-columns:repeat(2,1fr)!important;}.care-grid{grid-template-columns:1fr!important;}.support-grid{grid-template-columns:1fr!important;}.hiring-layout{flex-direction:column!important;}}@media(max-width:768px){.home-grid{grid-template-columns:1fr!important;}.hero-h1{font-size:36px!important;}.hero-p{font-size:14px!important;}.mode-cards-section{padding:32px 16px!important;}.hero-section{padding:0 16px 40px!important;}.guided-path{flex-wrap:wrap!important;gap:8px!important;}.proof-pills{flex-direction:column!important;align-items:center!important;}}";
 
 function HiringShell(){
   const{state,dispatch}=useStore();
@@ -3780,4 +3849,181 @@ function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
         </div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <s
+        <span style={{fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:20,background:color+"14",color:color,border:"1px solid "+color+"30"}}>{tag}</span>
+        <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
+          style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor="#6D5FFA";e.currentTarget.style.color="#6D5FFA";}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>
+          ← All modes
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// ── GLOBAL TIME SAVED COUNTER + KEYBOARD SHORTCUTS ───────────────────────
+function GlobalOverlay(){
+  const{state,dispatch}=useStore();
+  const[count,setCount]=useState(0);
+  const[visible,setVisible]=useState(true);
+  const pipelineDone=state.pipelineState==="done";
+
+  // Keyboard shortcuts
+  useEffect(()=>{
+    const handler=(e)=>{
+      if(e.key==="Escape") dispatch({type:"SET_MODE",payload:"home"});
+      if(e.key==="h"&&(e.metaKey||e.ctrlKey)){e.preventDefault();dispatch({type:"SET_MODE",payload:"hiring"});}
+      if(e.key==="s"&&(e.metaKey||e.ctrlKey)){e.preventDefault();dispatch({type:"SET_MODE",payload:"sales"});}
+    };
+    window.addEventListener("keydown",handler);
+    return()=>window.removeEventListener("keydown",handler);
+  },[dispatch]);
+
+  // Count up from 0 to total time saved
+  const totalHours=pipelineDone?Math.round((state.appliedResumes?.length||42)*0.35)+8:0;
+  useEffect(()=>{
+    if(!pipelineDone){setCount(0);return;}
+    let c=0;
+    const step=Math.ceil(totalHours/40);
+    const id=setInterval(()=>{
+      c+=step;if(c>=totalHours){setCount(totalHours);clearInterval(id);}else setCount(c);
+    },50);
+    return()=>clearInterval(id);
+  },[pipelineDone,totalHours]);
+
+  if(!pipelineDone||!visible) return null;
+  return(
+    <div style={{position:"fixed",bottom:20,left:20,zIndex:8000,animation:"fadeIn 0.5s ease"}}>
+      <div style={{background:"linear-gradient(135deg,#0F172A,#1D9E75)",borderRadius:14,padding:"10px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 24px rgba(0,0,0,0.22)",cursor:"pointer"}} onClick={()=>setVisible(false)} title="Click to dismiss">
+        <div style={{fontSize:20}}>⏱</div>
+        <div>
+          <div style={{fontSize:18,fontWeight:900,color:"white",lineHeight:1}}>{count}h</div>
+          <div style={{fontSize:9,color:"rgba(255,255,255,0.7)",fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em"}}>saved this session</div>
+        </div>
+        <div style={{width:1,height:28,background:"rgba(255,255,255,0.2)"}}/>
+        <div style={{fontSize:9,color:"rgba(255,255,255,0.6)",lineHeight:1.4,maxWidth:70}}>Esc→home<br/>⌘H hiring<br/>⌘S sales</div>
+      </div>
+    </div>
+  );
+}
+
+function PageTransition({children,modeKey}){
+  return(
+    <AnimatePresence mode="wait">
+      <motion.div key={modeKey} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-8}}
+        transition={{duration:0.22,ease:"easeOut"}} style={{display:"contents"}}>
+        {children}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+function AppInner(){
+  const{state,dispatch}=useStore();
+  const mode=state.appMode;
+  if(mode==="home") return<PageTransition modeKey="home"><HomeScreen/></PageTransition>;
+  if(mode==="hiring") return<PageTransition modeKey="hiring"><HiringShell/></PageTransition>;
+  if(mode==="overview") return(
+    <PageTransition modeKey="overview">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="FlowZint AI" tagColor="neutral"/>
+        <main style={{flex:1,overflow:"hidden"}}><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></main>
+        <ToastLayer/>
+      </div>
+    </PageTransition>
+  );
+  if(mode==="smb") return(
+    <PageTransition modeKey="smb">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🏪" title="SMB Brain" subtitle="1-Click Indian Business AI" color="#7C3AED" tag="Open Innovation" tagColor="purple"/>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><SMBMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
+  );
+  if(mode==="warroom") return(
+    <PageTransition modeKey="warroom">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="⚡" title="AI War Room" subtitle="Multi-Agent Command Center" color="#6D5FFA" tag="All agents" tagColor="brand"/>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><WarRoomMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
+  );
+  if(mode==="sales") return(
+    <PageTransition modeKey="sales">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🎯" title="SalesFlow AI" subtitle="Autonomous Sales Agent" color="#BA7517" tag="Sales Bot" tagColor="warn"/>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><SalesMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
+  );
+  if(mode==="support") return(
+    <PageTransition modeKey="support">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="💬" title="SupportFlow AI" subtitle="Intelligent Support Bot" color="#1D9E75" tag="Support Chat Bot" tagColor="success"/>
+        <main style={{flex:1,overflow:"hidden",padding:16}}><SupportMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
+  );
+  if(mode==="care") return(
+    <PageTransition modeKey="care">
+      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="❤️" title="CareFlow AI" subtitle="Customer Care Bot" color="#D4537E" tag="Customer Care Bot" tagColor="pink"/>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><CareMode/></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
+  );
+  return null;
+}
+
+function ApiKeyBanner(){
+  const[dismissed,setDismissed]=useState(false);
+  if(GROQ_API_KEY||dismissed) return null;
+  return(
+    <div style={{position:"fixed",top:0,left:0,right:0,zIndex:99999,background:"linear-gradient(135deg,#D85A30,#993C1D)",padding:"10px 20px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 4px 16px rgba(0,0,0,0.3)"}}>
+      <span style={{fontSize:18}}>⚠️</span>
+      <div style={{flex:1}}>
+        <div style={{fontSize:12,fontWeight:800,color:"white"}}>Groq API Key Missing — AI features disabled</div>
+        <div style={{fontSize:10,color:"rgba(255,255,255,0.8)"}}>Add VITE_GROQ_API_KEY to your .env file or Vercel environment variables, then redeploy.</div>
+      </div>
+      <button onClick={()=>setDismissed(true)} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:6,padding:"4px 10px",color:"white",fontSize:11,fontWeight:700,cursor:"pointer"}}>Dismiss</button>
+    </div>
+  );
+}
+
+function AppDataLoader(){
+  const{dispatch}=useStore();
+  useEffect(()=>{
+    if(!DB_READY) return;
+    // Load care tickets from Supabase on mount
+    loadCareTickets().then(tickets=>{
+      if(tickets&&tickets.length>0){
+        // Merge DB tickets with local ones — dispatch a custom action
+        dispatch({type:"ADD_TOAST",payload:{msg:"Loaded "+tickets.length+" care tickets from database","type":"info"}});
+      }
+    }).catch(()=>{});
+    // Load pipeline history count for dashboard display
+    loadPipelineHistory().then(runs=>{
+      if(runs&&runs.length>0){
+        dispatch({type:"ADD_TOAST",payload:{msg:"Session restored — "+runs.length+" pipeline runs in history","type":"info"}});
+      }
+    }).catch(()=>{});
+  },[]);
+  return null;
+}
+
+export default function App(){
+  const[state,dispatch]=useReducer(reducer,initialState);
+  return(
+    <Ctx.Provider value={{state,dispatch}}>
+      <style>{GLOBAL_STYLES}</style>
+      <ApiKeyBanner/>
+      <AppDataLoader/>
+      <AppInner/>
+    </Ctx.Provider>
+  );
+}
