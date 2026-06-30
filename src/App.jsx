@@ -43,7 +43,7 @@ const initialState = {
   salesProduct:"", salesTarget:"", salesProspects:[], salesRunning:false,
   salesEmailDrafts:{}, salesSentEmails:{},
   supportDocs:"", supportKB:[], supportChats:[], supportBuilding:false,
-  crossEvents:[], smbProfile:null, warRoomLogs:{}, dynamicScores:{},
+  crossEvents:[], smbProfile:null, warRoomLogs:{}, dynamicScores:{}, dynamicReasons:{},
   interviewMode:null, customQuestions:"", interviewDecisionOpen:false,
   activeCandidates:CANDIDATE_POOL.slice(0,5), roleDomain:"general",
   candidateDecisions:{}, submittedResumes:[], resumeScoring:false,
@@ -60,7 +60,7 @@ function reducer(s,a){
     case "SET_AGENT_STATUS": return{...s,agentStatuses:{...s.agentStatuses,[a.id]:a.status}};
     case "SET_AGENT_LOG": return{...s,agentLogs:{...s.agentLogs,[a.id]:a.log}};
     case "SET_AGENT_STREAM": return{...s,agentStreams:{...s.agentStreams,[a.id]:a.text}};
-    case "RESET_PIPELINE": return{...s,pipelineState:"idle",agentStatuses:{},agentLogs:{},agentStreams:{},biasReport:null,emailDrafts:{},interviewQs:{},aiAnalysis:{},sentEmails:{},salaryData:null,warRoomLogs:{},interviewMode:null,interviewDecisionOpen:false,dynamicScores:{},activeCandidates:CANDIDATE_POOL.slice(0,5),roleDomain:"general",pipelineStep:"jd",appliedResumes:[]};
+    case "RESET_PIPELINE": return{...s,pipelineState:"idle",agentStatuses:{},agentLogs:{},agentStreams:{},biasReport:null,emailDrafts:{},interviewQs:{},aiAnalysis:{},sentEmails:{},salaryData:null,warRoomLogs:{},interviewMode:null,interviewDecisionOpen:false,dynamicScores:{},dynamicReasons:{},activeCandidates:CANDIDATE_POOL.slice(0,5),roleDomain:"general",pipelineStep:"jd",appliedResumes:[]};
     case "SET_CANDIDATE": return{...s,selectedCandidate:a.payload};
     case "SET_LOADING_ANALYSIS": return{...s,loadingAnalysis:a.id};
     case "SET_AI_ANALYSIS": return{...s,aiAnalysis:{...s.aiAnalysis,[a.id]:a.text},loadingAnalysis:null};
@@ -97,6 +97,7 @@ function reducer(s,a){
     case "SET_ACTIVE_CANDIDATES": return{...s,activeCandidates:a.payload.candidates,roleDomain:a.payload.domain};
     case "SET_DYNAMIC_SCORES": return{...s,dynamicScores:a.payload};
     case "SET_DYNAMIC_VERDICTS": return{...s,dynamicVerdicts:a.payload};
+    case "SET_DYNAMIC_REASONS": return{...s,dynamicReasons:a.payload};
     case "SET_INTERVIEW_MODE": return{...s,interviewMode:a.payload,interviewDecisionOpen:false};
     case "SET_CUSTOM_QUESTIONS": return{...s,customQuestions:a.payload};
     case "OPEN_INTERVIEW_DECISION": return{...s,interviewDecisionOpen:true};
@@ -278,6 +279,7 @@ function AgentStep({agent,status,log,stream}){
   const[expanded,setExpanded]=useState(false);
   const{state}=useStore();
   const warLogs=state.warRoomLogs[agent.id]||[];
+  const hasReasoning=stream||(warLogs.length>0);
   const c={done:{bg:"#E1F5EE",border:"#9FE1CB",iconBg:"#1D9E75",nc:"#085041",sc:"#0F6E56",st:"Done"},active:{bg:"#EEEDFE",border:"#CECBF6",iconBg:"#534AB7",nc:"#3C3489",sc:"#534AB7",st:"Running..."},idle:{bg:"#FAFAF8",border:"#EEECEA",iconBg:"#E8E6DF",nc:"#888780",sc:"#B4B2A9",st:"Queued"}}[status]||{bg:"#FAFAF8",border:"#EEECEA",iconBg:"#E8E6DF",nc:"#888780",sc:"#B4B2A9",st:"Queued"};
   return(
     <div style={{background:c.bg,border:"1px solid "+c.border,borderRadius:10,padding:"11px 14px",transition:"all 0.4s"}}>
@@ -292,15 +294,29 @@ function AgentStep({agent,status,log,stream}){
         <div style={{display:"flex",alignItems:"center",gap:6}}>
           {status==="active"&&<div style={{width:6,height:6,borderRadius:"50%",background:"#534AB7",animation:"pulse 1s infinite"}}/>}
           <span style={{fontSize:10,fontWeight:700,color:c.sc}}>{c.st}</span>
-          {(status==="active"||status==="done")&&warLogs.length>0&&<button onClick={()=>setExpanded(!expanded)} style={{fontSize:9,background:"rgba(83,74,183,0.1)",border:"none",borderRadius:5,padding:"2px 6px",cursor:"pointer",color:"#534AB7",fontWeight:700}}>{expanded?"hide":"thoughts"}</button>}
+          {(status==="active"||status==="done")&&hasReasoning&&(
+            <button onClick={()=>setExpanded(!expanded)} style={{fontSize:9,background:expanded?"rgba(83,74,183,0.15)":"rgba(83,74,183,0.08)",border:"1px solid rgba(83,74,183,0.2)",borderRadius:5,padding:"2px 8px",cursor:"pointer",color:"#534AB7",fontWeight:700,transition:"all 0.15s"}}>
+              {expanded?"▲ hide":"▼ reasoning"}
+            </button>
+          )}
         </div>
       </div>
-      {status==="active"&&stream&&(<div style={{marginTop:8,background:"rgba(83,74,183,0.06)",borderRadius:7,padding:"8px 10px",fontFamily:"monospace",fontSize:10,color:"#534AB7",lineHeight:1.7,borderLeft:"2px solid #534AB7"}}><StreamText text={stream} speed={20}/></div>)}
-      {expanded&&warLogs.length>0&&(
-        <div style={{marginTop:8,background:"rgba(0,0,0,0.02)",borderRadius:7,padding:"8px 10px",borderLeft:"2px solid #1D9E75"}}>
-          <div style={{fontSize:9,fontWeight:800,color:"#1D9E75",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em"}}>Agent reasoning log</div>
-          {warLogs.map((l,i)=><div key={i} style={{fontSize:10,color:"#5F5E5A",lineHeight:1.6,marginBottom:2}}><span style={{color:"#B4B2A9",marginRight:6}}>{String(i+1).padStart(2,"0")}</span>{l}</div>)}
+      {status==="active"&&stream&&(
+        <div style={{marginTop:8,background:"rgba(83,74,183,0.06)",borderRadius:7,padding:"8px 10px",fontSize:10,color:"#534AB7",lineHeight:1.7,borderLeft:"2px solid #534AB7",whiteSpace:"pre-wrap"}}>
+          <div style={{fontSize:9,fontWeight:800,color:"#534AB7",marginBottom:4,textTransform:"uppercase",letterSpacing:"0.06em"}}>🧠 AI thinking live</div>
+          <StreamText text={stream} speed={20}/>
         </div>
+      )}
+      {expanded&&status==="done"&&(
+        <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:"auto"}} style={{marginTop:8,background:"white",borderRadius:8,padding:"10px 12px",border:"1px solid #CECBF6",borderLeft:"3px solid #534AB7"}}>
+          <div style={{fontSize:9,fontWeight:800,color:"#534AB7",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em"}}>What this agent found</div>
+          {stream&&<div style={{fontSize:11,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:warLogs.length>0?8:0}}>{stream}</div>}
+          {warLogs.length>0&&(
+            <div style={{borderTop:stream?"1px solid #EDE9FE":"none",paddingTop:stream?8:0}}>
+              {warLogs.map((l,i)=><div key={i} style={{fontSize:10,color:"#5F5E5A",lineHeight:1.6,marginBottom:2,display:"flex",gap:6}}><span style={{color:"#A78BFA",fontWeight:700,flexShrink:0}}>{String(i+1).padStart(2,"0")}</span>{l}</div>)}
+            </div>
+          )}
+        </motion.div>
       )}
     </div>
   );
@@ -889,10 +905,23 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[]){
       else scoreMap[c.id]=15+Math.floor(Math.random()*25);
     }
   }
+  const reasonMap={};
+  for(const c of domainCandidates){
+    const firstName=c.name.split(" ")[0];
+    const lastName=c.name.split(" ").pop();
+    for(const line of a2lines){
+      const lineUpper=line.toUpperCase();
+      if(lineUpper.includes(firstName.toUpperCase())||lineUpper.includes(lastName.toUpperCase())){
+        const reasonMatch=line.match(/REASON[:\s]+([^\|]+)/i)||line.match(/\|\s*([A-Z][^|]{15,})/i);
+        if(reasonMatch&&!reasonMap[c.id]) reasonMap[c.id]=reasonMatch[1].replace(/REASON[:\s]*/i,"").trim();
+      }
+    }
+  }
   dispatch({type:"SET_DYNAMIC_SCORES",payload:scoreMap});
   dispatch({type:"SET_DYNAMIC_VERDICTS",payload:verdictMap});
+  dispatch({type:"SET_DYNAMIC_REASONS",payload:reasonMap});
   dispatch({type:"SET_AGENT_STATUS",id:2,status:"done"});
-  dispatch({type:"SET_AGENT_LOG",id:2,log:"5 candidates scored against your JD."});
+  dispatch({type:"SET_AGENT_LOG",id:2,log:"5 candidates scored — reasons extracted."});
 
   // Agent 3: Bias Detector
   dispatch({type:"SET_AGENT_STATUS",id:3,status:"active"});
@@ -1497,7 +1526,7 @@ function HiringPipeline(){
       {(running||pDone)&&(
         <Card style={{padding:22}}>
           <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A",marginBottom:4}}>Live agent execution</div>
-          <div style={{fontSize:12,color:"#888780",marginBottom:14}}>Click "thoughts" on any agent to see its reasoning</div>
+          <div style={{fontSize:12,color:"#888780",marginBottom:14}}>Click <strong style={{color:"#534AB7"}}>▼ reasoning</strong> on any completed agent to see exactly what the AI found and decided</div>
           <div style={{display:"flex",flexDirection:"column",gap:8}}>{AGENTS.map(a=><AgentStep key={a.id} agent={a} status={state.agentStatuses[a.id]||"idle"} log={state.agentLogs[a.id]} stream={state.agentStreams[a.id]}/>)}</div>
         </Card>
       )}
@@ -1896,6 +1925,11 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
                   {c.skills.slice(0,3).map(s=><Tag key={s} color="success">{s}</Tag>)}
                   {c.gaps.slice(0,1).map(s=><Tag key={s} color="danger">Gap: {s}</Tag>)}
                 </div>
+                {state.dynamicReasons?.[c.id]&&(
+                  <div style={{marginTop:5,fontSize:10,color:"#534AB7",fontStyle:"italic",background:"#EEEDFE",padding:"3px 8px",borderRadius:6,border:"1px solid #CECBF6"}}>
+                    🤖 {state.dynamicReasons[c.id]}
+                  </div>
+                )}
               </div>
               <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,flexShrink:0}}>
                 <ScoreRing score={score} size={44} stroke={4} color={scoreColor}/>
@@ -2444,17 +2478,29 @@ function SalesMode(){
   const[objInput,setObjInput]=useState("");
   const[objReply,setObjReply]=useState("");
   const[objLoading,setObjLoading]=useState(false);
+  const[genThought,setGenThought]=useState("");
+  const[genPhase,setGenPhase]=useState(""); // "thinking" | "scoring" | "writing" | ""
 
   const generate=async()=>{
     if(!state.salesProduct.trim()){toast("Add product description first","error");return;}
     dispatch({type:"SET_SALES_RUNNING",val:true});
+    setGenThought("");setGenPhase("thinking");
     toast("Generating prospects...","info");
-    const p="Based on this product and target, generate 5 realistic B2B prospect profiles.\nProduct: "+state.salesProduct+"\nTarget: "+state.salesTarget+"\n\nReturn ONLY JSON array: [{id,name,role,company,industry,painPoint,fitScore,budget,objection,email}]. fitScore 0-100. Make realistic and specific.";
+
+    // Stream visible AI reasoning before generating
+    await callClaudeStream(
+      [{role:"user",content:"You are a B2B sales intelligence AI. Think out loud about this product and who would buy it.\n\nProduct: "+state.salesProduct.slice(0,400)+"\nTarget: "+(state.salesTarget||"Indian B2B market")+"\n\nWrite 4-5 sentences thinking through: Who feels this pain most? What industries? What role signs the cheque? What objection will kill the deal? Think fast, be specific to Indian market."}],
+      "Expert B2B sales strategist. Think out loud, be sharp and specific.",
+      (accumulated)=>setGenThought(accumulated)
+    );
+    setGenPhase("scoring");
+    const p="Based on this product and target, generate 5 realistic B2B prospect profiles.\nProduct: "+state.salesProduct+"\nTarget: "+state.salesTarget+"\n\nReturn ONLY JSON array: [{id,name,role,company,industry,painPoint,fitScore,budget,objection,email,whyScore}]. fitScore 0-100. whyScore: one sentence explaining why this fitScore (e.g. 'Strong match — SaaS company with 50+ employees and explicit hiring pain'). Make realistic and specific.";
     try{
       const raw=await callClaude([{role:"user",content:p}]);
       const clean=raw.split("```").join("").replace(/^json/i,"").trim();
       const prospects=JSON.parse(clean);
       dispatch({type:"SET_SALES_PROSPECTS",payload:prospects});
+      setGenPhase("writing");
       // Stream each email as it's written
       for(const pr of prospects){
         const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm. Sign as Sales Team, FlowZint.";
@@ -2466,6 +2512,7 @@ function SalesMode(){
         if(!emailText) dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" faces "+pr.painPoint+".\n\nOur platform can help. Would you be open to a 15-min call?\n\nBest,\nSales Team, FlowZint"});
       }
       toast("5 prospects with personalized outreach ready","success");
+      setGenPhase("");
       setActiveTab("prospects");
       // Save to Supabase
       saveSalesSession({product:state.salesProduct,industry:state.salesTarget,prospects,emailDrafts:{}});
@@ -2480,6 +2527,7 @@ function SalesMode(){
       dispatch({type:"SET_SALES_PROSPECTS",payload:fallback});
       for(const pr of fallback)dispatch({type:"SET_SALES_EMAIL",id:pr.id,text:"Hi "+pr.name.split(" ")[0]+",\n\nI noticed "+pr.company+" might be dealing with "+pr.painPoint+".\n\nOur AI platform saves 14+ hours per hire. Would you be open to a 15-min demo?\n\nBest,\nSales Team, FlowZint"});
       toast("Prospects generated","success");
+      setGenPhase("");
       setActiveTab("prospects");
     }
     dispatch({type:"SET_SALES_RUNNING",val:false});
@@ -2535,6 +2583,32 @@ function SalesMode(){
             <Btn variant="secondary" size="sm" onClick={()=>dispatch({type:"SET_SALES_TARGET",payload:SAMPLE_TARGET})} style={{marginTop:10}}>Use sample target</Btn>
           </Card>
           <Btn variant="orange" size="lg" disabled={state.salesRunning||!state.salesProduct.trim()} onClick={generate} fullWidth>{state.salesRunning?"Generating prospects...":"Generate prospects and outreach"}</Btn>
+          {/* Live AI thinking stream */}
+          {state.salesRunning&&(
+            <Card style={{padding:18,background:"#FFFBF5",border:"1.5px solid #FED7AA"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <div style={{width:8,height:8,borderRadius:"50%",background:"#EA580C",animation:"pulse 1s infinite"}}/>
+                <div style={{fontSize:11,fontWeight:800,color:"#9A3412",textTransform:"uppercase",letterSpacing:"0.06em"}}>
+                  {genPhase==="thinking"?"🧠 AI analysing market...":genPhase==="scoring"?"📊 Scoring prospect fit...":genPhase==="writing"?"✍️ Writing personalized emails...":"Processing..."}
+                </div>
+              </div>
+              {genThought&&(
+                <div style={{fontSize:12,color:"#7C2D12",lineHeight:1.75,whiteSpace:"pre-wrap",background:"white",borderRadius:8,padding:"10px 12px",border:"1px solid #FED7AA",borderLeft:"3px solid #EA580C"}}>
+                  {genThought}
+                  {genPhase==="thinking"&&<span style={{display:"inline-block",width:2,height:12,background:"#EA580C",marginLeft:2,animation:"blink 0.7s infinite",verticalAlign:"text-bottom"}}/>}
+                </div>
+              )}
+              {genPhase==="writing"&&(
+                <div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {state.salesProspects.map(p=>(
+                    <div key={p.id} style={{fontSize:10,padding:"3px 10px",background:state.salesEmailDrafts[p.id]?"#E1F5EE":"#FFF7ED",border:"1px solid "+(state.salesEmailDrafts[p.id]?"#86EFAC":"#FED7AA"),borderRadius:20,color:state.salesEmailDrafts[p.id]?"#15803D":"#9A3412",fontWeight:600}}>
+                      {state.salesEmailDrafts[p.id]?"✓ ":"✍️ "}{p.name.split(" ")[0]}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
         </div>
       )}
 
@@ -2549,7 +2623,8 @@ function SalesMode(){
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><div style={{fontSize:14,fontWeight:700,color:"#1C1C1A"}}>{p.name}</div><Tag color="warn">{p.role}</Tag><Tag color="neutral">{p.industry}</Tag></div>
                   <div style={{fontSize:12,color:"#888780",marginBottom:8}}>{p.company} · {p.budget}</div>
                   <div style={{fontSize:12,color:"#633806",padding:"8px 10px",background:"#FFF8EE",borderRadius:7,border:"1px solid #FAC775",marginBottom:6}}>Pain: {p.painPoint}</div>
-                  <div style={{fontSize:11,color:"#993C1D"}}>Likely objection: "{p.objection}"</div>
+                  <div style={{fontSize:11,color:"#993C1D",marginBottom:6}}>Likely objection: "{p.objection}"</div>
+                  {p.whyScore&&<div style={{fontSize:10,color:"#534AB7",padding:"5px 8px",background:"#EEEDFE",borderRadius:6,border:"1px solid #CECBF6",fontStyle:"italic"}}>🤖 {p.whyScore}</div>}
                 </div>
                 <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
                   <div style={{fontSize:22,fontWeight:800,color:"#BA7517"}}>{p.fitScore}</div>
