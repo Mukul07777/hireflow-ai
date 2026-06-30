@@ -194,7 +194,7 @@ const getGroqKey=()=>{const k=_GROQ_KEYS[_keyIdx%_GROQ_KEYS.length];_keyIdx++;re
 const GROQ_API_KEY=import.meta.env.VITE_GROQ_API_KEY||"";
 const GROQ_MODEL="llama-3.3-70b-versatile";
 let HINDI_MODE=false; // synced from React state by HindiSync component
-const HINDI_SUFFIX="\n\nमहत्वपूर्ण: अपना पूरा जवाब हिंदी में दें (देवनागरी लिपि)। सरल, रोज़मर्रा की हिंदी का इस्तेमाल करें जो भारतीय व्यापारी आसानी से समझ सकें।";
+const HINDI_SUFFIX="\n\nIMPORTANT: Respond in Hinglish — a natural mix of Hindi and English the way educated Indians actually speak and text. Write in Roman script (not Devanagari). Example style: 'Aapka pipeline ready hai — 5 candidates shortlist hue hain, top pick Aditya Kumar hai jo 91/100 score kiya. Uska notice period 30 days hai toh jaldi decision lena padega.' Keep it warm, conversational, and professional.";
 
 // Non-streaming (used for structured JSON responses)
 async function callClaude(messages,system=""){
@@ -602,7 +602,7 @@ function HomeScreen(){
             <button onClick={()=>dispatch({type:"TOGGLE_HINDI"})}
               title={state.hindiMode?"Switch to English":"Switch to Hindi / हिंदी"}
               style={{padding:"7px 12px",background:state.hindiMode?"rgba(124,58,237,0.5)":"rgba(255,255,255,0.07)",border:"1px solid "+(state.hindiMode?"rgba(124,58,237,0.8)":"rgba(255,255,255,0.15)"),borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",color:"white",transition:"all 0.2s"}}>
-              {state.hindiMode?"अ EN":"अ HI"}
+              {state.hindiMode?"🌐 EN":"🇮🇳 HI"}
             </button>
             <button onClick={()=>dispatch({type:"TOGGLE_DARK"})}
               title={state.darkMode?"Light mode":"Dark mode"}
@@ -4127,7 +4127,7 @@ function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
         <button onClick={()=>dispatch({type:"TOGGLE_HINDI"})}
           title={state.hindiMode?"Switch to English":"Switch to Hindi"}
           style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:8,border:"1px solid #E5E7EB",background:state.hindiMode?"#7C3AED":"#F9FAFB",color:state.hindiMode?"white":"#6B7280",cursor:"pointer",transition:"all 0.2s"}}>
-          {state.hindiMode?"अ EN":"अ HI"}
+          {state.hindiMode?"🌐 EN":"🇮🇳 HI"}
         </button>
         <button onClick={()=>dispatch({type:"TOGGLE_DARK"})}
           title={state.darkMode?"Switch to Light mode":"Switch to Dark mode"}
@@ -4287,7 +4287,7 @@ function HindiSync(){
     if(first.current){first.current=false;return;}
     // Show floating indicator when toggled
     const el=document.createElement("div");
-    el.textContent=state.hindiMode?"🇮🇳 Hindi mode ON — AI will now respond in Hindi":"🌐 English mode — AI will respond in English";
+    el.textContent=state.hindiMode?"🇮🇳 Hinglish mode ON — AI will respond in Hindi-English mix":"🌐 English mode — AI will respond in English";
     Object.assign(el.style,{position:"fixed",bottom:"80px",left:"50%",transform:"translateX(-50%)",background:state.hindiMode?"#4C1D95":"#1C1C2E",color:"white",padding:"10px 20px",borderRadius:"24px",fontSize:"13px",fontWeight:"700",zIndex:"99999",boxShadow:"0 4px 20px rgba(0,0,0,0.3)",pointerEvents:"none"});
     document.body.appendChild(el);
     setTimeout(()=>el.remove(),2800);
