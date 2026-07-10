@@ -2,7 +2,7 @@
  * db.js — Supabase REST helpers (no SDK, pure fetch)
  * Falls back silently if DB not configured.
  */
-import { dbInsert, dbInsertMany, dbSelect, dbUpdate, DB_READY } from './supabase'
+import { dbInsert, dbInsertMany, dbSelect, dbUpdate, dbDelete, DB_READY } from './supabase'
 
 // ── PIPELINE RUNS ─────────────────────────────────────────────────────────
 
@@ -106,6 +106,28 @@ export async function saveCareTicket({ ticket, toneUsed, aiResponse, approved })
 
 export async function loadCareTickets() {
   return dbSelect('care_tickets', {}, 'created_at.desc', 50)
+}
+
+// ── DATA DELETION (DPDP Act, 2023 — data-subject deletion request) ─────────
+// Deleting pipeline_runs cascades to candidates and outreach_emails automatically
+// via the "on delete cascade" foreign keys in supabase_schema.sql, so those two
+// tables don't need separate delete calls here. sales_sessions, support_sessions,
+// and care_tickets are top-level per-user tables and are deleted directly.
+//
+// IMPORTANT: this only works correctly once supabase_rls_v2_fix.sql has been run —
+// the DELETE policies it adds don't exist in the original supabase_rls.sql, so
+// without that fix this call would silently delete zero rows (RLS blocks it) while
+// still returning as if it succeeded. See that file's header for why.
+export async function deleteAllUserData(userId) {
+  if (!DB_READY || !userId) return { ok: false, reason: "DB not configured or no user id provided" }
+  const results = await Promise.all([
+    dbDelete('pipeline_runs', { user_id: `eq.${userId}` }),
+    dbDelete('sales_sessions', { user_id: `eq.${userId}` }),
+    dbDelete('support_sessions', { user_id: `eq.${userId}` }),
+    dbDelete('care_tickets', { user_id: `eq.${userId}` }),
+  ])
+  const failed = results.some((r) => r === null)
+  return { ok: !failed, tablesAttempted: 4 }
 }
 
 export { DB_READY }

@@ -67,3 +67,17 @@ export async function dbUpdate(table, filter, updates) {
     return await res.json()
   } catch (e) { console.error(`dbUpdate ${table}:`, e); return null }
 }
+
+/** DELETE rows matching filter — returns the deleted rows (Supabase's Prefer: return=representation), or null on failure. */
+export async function dbDelete(table, filter) {
+  if (!DB_READY) return null
+  try {
+    const qs = new URLSearchParams(filter)
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
+      method: 'DELETE',
+      headers,
+    })
+    if (!res.ok) { console.error(`dbDelete ${table}:`, await res.text()); return null }
+    return await res.json()
+  } catch (e) { console.error(`dbDelete ${table}:`, e); return null }
+}

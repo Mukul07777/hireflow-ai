@@ -10,6 +10,7 @@ import {
   saveSupportSession,
   saveCareTicket,
   loadCareTickets,
+  deleteAllUserData,
   DB_READY,
 } from "./db.js";
 
@@ -74,5 +75,16 @@ describe("db.js — graceful degradation when Supabase is not configured", () =>
   it("loadCareTickets returns an empty array instead of throwing", async () => {
     const result = await loadCareTickets();
     expect(result).toEqual([]);
+  });
+
+  it("deleteAllUserData returns a clear failure reason instead of throwing when DB isn't configured", async () => {
+    const result = await deleteAllUserData("some-user-id");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/not configured/i);
+  });
+
+  it("deleteAllUserData returns a failure when called without a user id", async () => {
+    const result = await deleteAllUserData(null);
+    expect(result.ok).toBe(false);
   });
 });
