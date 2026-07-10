@@ -5197,7 +5197,7 @@ function AuthScreen({onAuth}){
   return(
     <div style={{minHeight:"100vh",display:"flex",background:"linear-gradient(135deg,#0F0F1A 0%,#1E1B4B 50%,#0F172A 100%)"}}>
       {/* Left panel — branding */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 48px",display:"none"}} className="auth-left">
+      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 48px"}} className="auth-left">
         <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:"-0.02em",marginBottom:12}}>
           <span style={{background:"linear-gradient(135deg,#6D5FFA,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>NexFlow AI</span>
         </div>
