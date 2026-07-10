@@ -71,7 +71,7 @@ Most AI tools are single-purpose. NexFlow AI runs 6 specialized agents simultane
 - **WhatsApp send** — pre-filled wa.me deep links in SalesFlow outreach and CareFlow responses
 - **Parallel War Room agents** — 4 AI agents run simultaneously via Promise.all, not sequentially
 - **Live Agent Network** — animated SVG on home screen with 6 agent nodes and real-time data-flow pulses; click any node to open that mode
-- **Bulk resume processor** — paste 10+ resumes separated by ---, AI parses, scores, and ranks all against the JD
+- **Bulk resume processor** — paste 10+ resumes separated by ---, AI parses, scores, and ranks all against the JD. The batch-splitting and name-extraction step (the part that runs locally, before any LLM call) is unit tested and benchmarked: `node scripts/benchmark-resume-parsing.mjs` measures ~0.2ms to split and extract names from 200 pasted resumes on ordinary hardware. That number does not include the LLM scoring pass that follows — that step's latency depends on Groq's API and isn't something this repo controls or should claim a fixed number for.
 - **Groq key rotation** — round-robin across up to 4 API keys for load distribution
 - **Real command report** — War Room final report uses actual candidate counts, prospect counts, and calculated ROI
 
@@ -94,6 +94,8 @@ Most AI tools are single-purpose. NexFlow AI runs 6 specialized agents simultane
 
 This does not cover the React component layer — there is no component/integration test suite yet. Treat the frontend as manually-tested, not regression-tested.
 
+`node scripts/benchmark-resume-parsing.mjs` measures the local (non-LLM) resume-batch-splitting step directly, so the throughput claim in Key Features above is a number you can reproduce, not a marketing figure.
+
 ---
 
 ## Known Limitations
@@ -101,7 +103,7 @@ This does not cover the React component layer — there is no component/integrat
 Being upfront about what "production patterns" in the section above does and doesn't mean:
 
 - **WhatsApp delivery** goes through CallMeBot, a free hobbyist API with no SLA and informal rate limits. It's adequate for demos, not for production message volume — a real deployment should move to the WhatsApp Business API.
-- **No automated tests on the UI layer.** `App.jsx` is a single ~5,400-line file; the Groq key rotation logic has been extracted into `lib/groqKeyRotation.js` and is unit tested, but the rest of the component tree isn't yet split out or tested.
+- **No automated tests on the UI layer.** `App.jsx` is a single ~5,400-line file; the Groq key rotation logic (`lib/groqKeyRotation.js`) and the resume batch-parsing logic (`lib/resumeParsing.js`) have been extracted and are unit tested, but the rest of the component tree isn't yet split out or tested.
 - **Bias audit, salary benchmarking, and sentiment detection are LLM-generated outputs**, not validated against labeled ground truth — treat them as a starting draft for human review, not a certified result.
 
 ---
@@ -154,7 +156,10 @@ src/
   lib/
     db.js                  # Supabase REST helpers (unit tested)
     supabase.js            # pure fetch Supabase client
-    groqKeyRotation.js      # Groq API key round-robin (unit tested)
+    groqKeyRotation.js     # Groq API key round-robin (unit tested)
+    resumeParsing.js       # resume batch split + name extraction (unit tested, benchmarked)
+scripts/
+  benchmark-resume-parsing.mjs  # run: node scripts/benchmark-resume-parsing.mjs
 ```
 
 **Supabase table for War Room memory** (run in Supabase SQL editor):

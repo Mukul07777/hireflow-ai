@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { splitResumes, extractName } from "./lib/resumeParsing.js";
 
 // ── BULK RESUME PROCESSOR ─────────────────────────────────────────────────
 // Real world flow: paste multiple resumes → AI parses all → scores → ranks → shortlists
@@ -21,34 +22,6 @@ export function BulkResumeProcessor({jdText, onResumesParsed, callClaude}){
   const[view,setView]=useState("input"); // input | processing | results
   const[filter,setFilter]=useState("all"); // all | shortlisted | review | rejected
   const fileRef=useRef(null);
-
-  // Split bulk text into individual resumes
-  // Separators: "---", "===", blank lines with a name pattern, or "Resume X:"
-  const splitResumes=(text)=>{
-    // Try separator-based split first
-    const separators=[/\n---+\n/,/\n===+\n/,/\n_{3,}\n/];
-    for(const sep of separators){
-      const parts=text.split(sep).map(p=>p.trim()).filter(p=>p.length>50);
-      if(parts.length>1) return parts;
-    }
-    // Try splitting by "Resume N:" or "Candidate N:"
-    const numbered=text.split(/\n(?=Resume\s+\d+:|Candidate\s+\d+:)/i).map(p=>p.trim()).filter(p=>p.length>50);
-    if(numbered.length>1) return numbered;
-    // Fallback: treat whole thing as one resume
-    return [text.trim()].filter(p=>p.length>50);
-  };
-
-  const extractName=(text)=>{
-    const lines=text.split("\n").map(l=>l.trim()).filter(Boolean);
-    // First non-empty line is usually the name
-    const first=lines[0];
-    // If it looks like a name (2-3 words, no special chars except spaces)
-    if(first&&/^[A-Za-z\s]{3,40}$/.test(first)&&!first.includes("Resume")&&!first.includes("CV")) return first;
-    // Try to find "Name: X" pattern
-    const nameLine=lines.find(l=>l.match(/^name\s*:/i));
-    if(nameLine) return nameLine.replace(/^name\s*:\s*/i,"").trim();
-    return "Candidate "+(Math.random()*100|0);
-  };
 
   const processResumes=async()=>{
     if(!bulkText.trim()){return;}
