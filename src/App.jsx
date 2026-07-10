@@ -285,6 +285,31 @@ function useActivityLog(){
 }
 
 // Non-streaming (used for structured JSON responses)
+// Groq returns a 200-shaped JSON error body on bad/expired keys — fetch() doesn't throw on
+// that, so without an explicit res.ok check a dead key fails silently (empty string) instead
+// of retrying the next key in rotation. This wraps the request+retry so both callClaude and
+// callClaudeStream get the same "skip a dead key, don't go silent" behavior.
+async function fetchGroqWithRetry(payload){
+  const maxAttempts=Math.max(1,_GROQ_KEYS.length);
+  let lastRes=null,lastErrBody=null;
+  for(let attempt=0;attempt<maxAttempts;attempt++){
+    const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+getGroqKey()},
+      body:JSON.stringify(payload)
+    });
+    if(res.ok) return res;
+    lastRes=res;
+    try{lastErrBody=await res.clone().json();}catch{lastErrBody=null;}
+    // 401/403 = bad/expired key — worth burning a retry on the next key in rotation.
+    // Other errors (429/5xx) would just fail the same way on every key, so don't loop those.
+    if(res.status!==401&&res.status!==403) break;
+  }
+  const err=new Error("Groq API error "+(lastRes?.status||"?")+": "+(lastErrBody?.error?.message||"request failed after trying all configured keys"));
+  err.status=lastRes?.status;
+  throw err;
+}
+
 async function callClaude(messages,system=""){
   const callId=++_callCount;
   const keyIdx=_groqRotator.nextIndex;
@@ -294,11 +319,7 @@ async function callClaude(messages,system=""){
   try{
     const sys=(HINDI_MODE&&!system.includes("JSON"))?system+HINDI_SUFFIX:system;
     const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
-    const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+getGroqKey()},
-      body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages})
-    });
+    const res=await fetchGroqWithRetry({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages});
     const data=await res.json();
     const txt=data.choices?.[0]?.message?.content||"";
     const ms=Date.now()-t0;
@@ -320,11 +341,7 @@ async function callClaudeStream(messages,system="",onChunk){
   try{
     const sys=HINDI_MODE?(system+HINDI_SUFFIX):system;
     const groqMessages=sys?[{role:"system",content:sys},...messages]:messages;
-    const res=await fetch("https://api.groq.com/openai/v1/chat/completions",{
-      method:"POST",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+getGroqKey()},
-      body:JSON.stringify({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages,stream:true})
-    });
+    const res=await fetchGroqWithRetry({model:GROQ_MODEL,max_tokens:1000,messages:groqMessages,stream:true});
     const reader=res.body.getReader();
     const decoder=new TextDecoder();
     let full="";
