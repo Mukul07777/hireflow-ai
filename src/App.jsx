@@ -20,6 +20,7 @@ import {
   DB_READY,
 } from "./lib/db.js";
 import { createKeyRotator } from "./lib/groqKeyRotation.js";
+import { runIndiaComplianceCheck, formatComplianceFlags } from "./lib/indiaComplianceRules.js";
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────
 const EJS={svc:"service_f5hfgxa",tpl:"template_kcl0nki",key:"Yu7ThCT-UB7Kn7uc1"};
@@ -1546,7 +1547,11 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[], 
   const gm=a3?.match(/GENDER_SCORE[:\s]*(\d+)/i);
   const fm=a3?.match(/FLAGS[:\s]*([\s\S]*?)(?:FIX:|$)/i);
   const rem=a3?.match(/FIX[:\s]*(.*)/i);
-  dispatch({type:"SET_BIAS",payload:{score:gm?parseInt(gm[1]):84,flags:fm?fm[1].trim().split("\n").filter(f=>f.trim()).map(f=>f.replace(/^[-•*]\s*/,"")):["Review vague requirements"],recommendation:rem?rem[1].trim():"Use skills-based criteria."}});
+  const llmFlags=fm?fm[1].trim().split("\n").filter(f=>f.trim()).map(f=>f.replace(/^[-•*]\s*/,"")):["Review vague requirements"];
+  // Deterministic, rule-based India-specific checks — reproducible regardless of LLM phrasing.
+  // See lib/indiaComplianceRules.js for what these do and don't certify.
+  const indiaFlags=formatComplianceFlags(runIndiaComplianceCheck(jdText));
+  dispatch({type:"SET_BIAS",payload:{score:gm?parseInt(gm[1]):84,flags:[...llmFlags,...indiaFlags],recommendation:rem?rem[1].trim():"Use skills-based criteria."}});
   dispatch({type:"SET_AGENT_STATUS",id:3,status:"done"});
   dispatch({type:"SET_AGENT_LOG",id:3,log:"Bias audit complete."});
 

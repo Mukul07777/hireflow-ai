@@ -39,6 +39,7 @@ A multi-agent AI platform where 6 autonomous systems — hiring, sales, support,
 
 - **Not a chatbot** — an agent network with real handoffs, memory, and debate
 - **India-first** — salary benchmarks, Hindi/Hinglish toggle, WhatsApp delivery, Indian market data
+- **Deterministic India-compliance checks** — regex-based flags for age-proxy language, gendered job titles, missing equal-opportunity statements, salary-secrecy clauses, and over-specified experience requirements, referenced against the actual Indian legal framework (Equal Remuneration Act, POSH Act, Code on Wages) rather than a generic Western bias checklist. Reproducible — the same JD always produces the same flags, unlike the LLM-based bias score which can vary call to call. Wired live into the Bias Detector agent; see `lib/indiaComplianceRules.js`.
 - **Transparent AI** — live backend panel shows every token, every key, every API call in real time
 - **Production patterns** — Supabase Auth + Google OAuth, Row Level Security on all tables, React error boundaries, key rotation across 4 Groq keys, session persistence
 
@@ -108,6 +109,15 @@ Being upfront about what "production patterns" in the section above does and doe
 
 ---
 
+## Additional capabilities (built, tested, not yet wired into the UI)
+
+Two modules exist as tested library functions but are not yet called from any screen. Listed here explicitly rather than left as silent dead code, with what it would take to finish wiring each one in:
+
+- **`lib/indianVerification.js`** — structural + checksum validation for PAN, GSTIN, and Udyam (MSME) registration numbers. Important scope limit: this validates that a number is *shaped like* a real one and internally checksum-consistent (the GSTIN checksum implementation is verified against the standard public test vector `27AAPFU0939F1ZV`) — it does **not** call any government registry, so it cannot confirm a number is actually registered or active. Intended use: a free, instant, no-network first-pass filter in SalesFlow lead intake or HireFlow employer verification, catching obviously fabricated identifiers before a human looks at the lead/candidate. Wiring it in means adding one input field + one function call in `SalesMode()`/`HiringCandidates()` in `App.jsx`.
+- **`lib/outcomeLearning.js`** — a frequency-weighted tracker (explicitly *not* reinforcement learning — see the file header) that records which outreach message openings led to a reply/conversion vs. no reply, ranks them by success rate, and can generate a prompt hint nudging future message generation toward what's actually worked. This is the mechanism for turning "agents hand off data" into "agents adjust based on measured outcomes" — but it needs real reply/conversion events to learn from, which means either live usage over time or a seeded historical dataset, honestly labeled as such rather than presented as live learning from a demo session.
+
+---
+
 ## Environment Variables
 
 Add to Vercel Project Settings > Environment Variables:
@@ -154,10 +164,13 @@ src/
   SampleData.js            # candidate pool, domain detection
   ResumeBank.js            # 50+ sample resumes across 8 domains
   lib/
-    db.js                  # Supabase REST helpers (unit tested)
-    supabase.js            # pure fetch Supabase client
-    groqKeyRotation.js     # Groq API key round-robin (unit tested)
-    resumeParsing.js       # resume batch split + name extraction (unit tested, benchmarked)
+    db.js                     # Supabase REST helpers (unit tested)
+    supabase.js               # pure fetch Supabase client
+    groqKeyRotation.js        # Groq API key round-robin (unit tested)
+    resumeParsing.js          # resume batch split + name extraction (unit tested, benchmarked)
+    indiaComplianceRules.js   # deterministic India-law JD checks (unit tested, wired into bias audit)
+    indianVerification.js     # PAN/GSTIN/Udyam format+checksum validation (unit tested, not yet wired in)
+    outcomeLearning.js        # outreach outcome tracker (unit tested, not yet wired in)
 scripts/
   benchmark-resume-parsing.mjs  # run: node scripts/benchmark-resume-parsing.mjs
 ```
