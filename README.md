@@ -88,6 +88,24 @@ Most AI tools are single-purpose. NexFlow AI runs 6 specialized agents simultane
 
 ---
 
+## Testing & CI
+
+`npm test` runs the Vitest suite (`src/lib/*.test.js`) covering the Groq key-rotation logic and the Supabase REST helpers' fallback behavior when no database is configured. GitHub Actions (`.github/workflows/ci.yml`) runs the test suite and a production build on every push to `main` and on every pull request.
+
+This does not cover the React component layer — there is no component/integration test suite yet. Treat the frontend as manually-tested, not regression-tested.
+
+---
+
+## Known Limitations
+
+Being upfront about what "production patterns" in the section above does and doesn't mean:
+
+- **WhatsApp delivery** goes through CallMeBot, a free hobbyist API with no SLA and informal rate limits. It's adequate for demos, not for production message volume — a real deployment should move to the WhatsApp Business API.
+- **No automated tests on the UI layer.** `App.jsx` is a single ~5,400-line file; the Groq key rotation logic has been extracted into `lib/groqKeyRotation.js` and is unit tested, but the rest of the component tree isn't yet split out or tested.
+- **Bias audit, salary benchmarking, and sentiment detection are LLM-generated outputs**, not validated against labeled ground truth — treat them as a starting draft for human review, not a certified result.
+
+---
+
 ## Environment Variables
 
 Add to Vercel Project Settings > Environment Variables:
@@ -104,7 +122,7 @@ VITE_CALLMEBOT_APIKEY=your_callmebot_key
 
 WhatsApp setup (CallMeBot — free): send `I allow callmebot to send me messages` to +34 644 59 97 91 on WhatsApp. CallMeBot replies with your API key. Add your number + that key to Vercel. Without these, WhatsApp buttons fall back to wa.me deep links.
 
-Never commit .env — keys live in Vercel env vars only.
+Never commit .env — keys live in Vercel env vars only. If a key ever ends up in a commit, rotating it is not optional: removing the file in a later commit does not remove it from git history, and anyone can pull it back out with `git show <commit>:.env`.
 
 ---
 
@@ -116,6 +134,8 @@ cd hireflow-ai
 npm install
 # create .env with your keys
 npm run dev
+npm test        # run unit tests
+npm run build   # production build
 ```
 
 ---
@@ -124,7 +144,7 @@ npm run dev
 
 ```
 src/
-  App.jsx                  # entire frontend (~3800 lines)
+  App.jsx                  # entire frontend (~5400 lines)
   BulkResumeProcessor.jsx  # resume parsing + scoring
   BiasAudit.jsx            # JD bias detection
   RejectionFlow.jsx        # candidate decision bar
@@ -132,8 +152,9 @@ src/
   SampleData.js            # candidate pool, domain detection
   ResumeBank.js            # 50+ sample resumes across 8 domains
   lib/
-    db.js                  # Supabase REST helpers
+    db.js                  # Supabase REST helpers (unit tested)
     supabase.js            # pure fetch Supabase client
+    groqKeyRotation.js      # Groq API key round-robin (unit tested)
 ```
 
 **Supabase table for War Room memory** (run in Supabase SQL editor):
@@ -151,4 +172,3 @@ create table war_room_sessions (
 ```
 
 State: single useReducer at root. AI: module-level callClaude() and callClaudeStream() with round-robin key rotation.
-
