@@ -19,6 +19,7 @@ import {
   loadCareTickets,
   DB_READY,
 } from "./lib/db.js";
+import { createKeyRotator } from "./lib/groqKeyRotation.js";
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────
 const EJS={svc:"service_f5hfgxa",tpl:"template_kcl0nki",key:"Yu7ThCT-UB7Kn7uc1"};
@@ -250,14 +251,15 @@ function storeSession(session){
 }
 
 // ── GROQ KEY ROTATION (round-robin across up to 4 keys for load distribution) ──
+// Rotation logic itself lives in lib/groqKeyRotation.js (unit tested); this just wires env vars in.
 const _GROQ_KEYS=[
   import.meta.env.VITE_GROQ_API_KEY,
   import.meta.env.VITE_GROQ_API_KEY_2,
   import.meta.env.VITE_GROQ_API_KEY_3,
   import.meta.env.VITE_GROQ_API_KEY_4,
 ].filter(Boolean);
-let _keyIdx=0;
-const getGroqKey=()=>{const k=_GROQ_KEYS[_keyIdx%_GROQ_KEYS.length];_keyIdx++;return k||"";};
+const _groqRotator=createKeyRotator(_GROQ_KEYS);
+const getGroqKey=()=>_groqRotator.getKey();
 const GROQ_API_KEY=import.meta.env.VITE_GROQ_API_KEY||"";
 const GROQ_MODEL="llama-3.3-70b-versatile";
 let HINDI_MODE=false; // synced from React state by HindiSync component
@@ -284,7 +286,7 @@ function useActivityLog(){
 // Non-streaming (used for structured JSON responses)
 async function callClaude(messages,system=""){
   const callId=++_callCount;
-  const keyIdx=_keyIdx%_GROQ_KEYS.length;
+  const keyIdx=_groqRotator.nextIndex;
   const promptLen=messages.reduce((n,m)=>n+(m.content?.length||0),0)+(system?.length||0);
   const t0=Date.now();
   _pushActivity({type:"api",status:"pending",callId,model:GROQ_MODEL,mode:"json",promptChars:promptLen,keySlot:keyIdx+1,totalKeys:_GROQ_KEYS.length,label:system.slice(0,60)||"AI call"});
@@ -310,7 +312,7 @@ async function callClaude(messages,system=""){
 // Real SSE streaming — onChunk(accumulatedText, newToken)
 async function callClaudeStream(messages,system="",onChunk){
   const callId=++_callCount;
-  const keyIdx=_keyIdx%_GROQ_KEYS.length;
+  const keyIdx=_groqRotator.nextIndex;
   const promptLen=messages.reduce((n,m)=>n+(m.content?.length||0),0)+(system?.length||0);
   const t0=Date.now();
   _pushActivity({type:"api",status:"streaming",callId,model:GROQ_MODEL,mode:"stream",promptChars:promptLen,keySlot:keyIdx+1,totalKeys:_GROQ_KEYS.length,label:system.slice(0,60)||"AI stream"});
