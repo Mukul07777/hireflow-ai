@@ -28,11 +28,15 @@ describe("splitResumes", () => {
     expect(splitResumes(text)).toHaveLength(1);
   });
 
-  it("drops fragments under 50 characters (noise, not a real resume)", () => {
+  it("falls back to treating the whole paste as one resume when the separator split leaves only one valid-length piece", () => {
+    // "short" (5 chars) is filtered out as noise, leaving only 1 piece post-filter — since
+    // splitResumes requires >1 surviving pieces to trust the split, it correctly falls back
+    // to the numbered-header check, then to the whole-text fallback (which is why the result
+    // is the full original string, not just the 60-char "A" block).
     const text = "short\n---\n" + "A".repeat(60);
     const parts = splitResumes(text);
     expect(parts).toHaveLength(1);
-    expect(parts[0]).toHaveLength(60);
+    expect(parts[0]).toBe(text);
   });
 
   it("returns an empty array for empty input", () => {

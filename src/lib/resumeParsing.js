@@ -28,7 +28,7 @@ export function extractName(text) {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const first = lines[0];
   // If the first line looks like a plain name (2-3 words, letters/spaces only).
-  if (first && /^[A-Za-z\s]{3,40}$/.test(first) && !first.includes("Resume") && !first.includes("CV")) {
+  if (first && /^[A-Za-z\s]{3,40}$/.test(first) && !/resume|cv/i.test(first)) {
     return first;
   }
   // Try an explicit "Name: X" line anywhere in the resume.
