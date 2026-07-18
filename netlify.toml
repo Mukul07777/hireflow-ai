@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# SPA fallback — the app does its own in-app routing, so every path
+# must serve index.html rather than 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

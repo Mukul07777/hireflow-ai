@@ -6,7 +6,7 @@
 
 **Six AI agents that share one memory — so the same customer is recognized across every team.**
 
-[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-Try_it_now-1C7A93?style=for-the-badge)](https://hireflow-ai-liart.vercel.app)
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-Try_it_now-1C7A93?style=for-the-badge)](https://nexflow-ai-india.netlify.app)
 &nbsp;
 [![CI](https://img.shields.io/badge/CI-passing-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 &nbsp;
@@ -25,7 +25,7 @@
 
 ---
 
-> **Live demo → [hireflow-ai-liart.vercel.app](https://hireflow-ai-liart.vercel.app)**
+> **Live demo → [nexflow-ai-india.netlify.app](https://nexflow-ai-india.netlify.app)**
 > Sign in with Google, email/password, or click **Try Demo** for instant access — no signup needed.
 
 **NexFlow AI** runs six specialized AI agents — hiring, sales, support, customer care, SMB intelligence, and a live War Room — and binds them with a seventh system, the **Company Brain**: one shared memory every agent reads from *before* it acts. Seven AI systems in all. Built for how Indian businesses actually work.
@@ -325,7 +325,7 @@ See [`supabase/README.md`](supabase/README.md) for what each file does.
 
 ## 🔑 Environment variables
 
-Add to **Vercel → Project Settings → Environment Variables** (and a local `.env`):
+Add to **Netlify → Site settings → Environment variables** (and a local `.env`):
 
 ```bash
 VITE_GROQ_API_KEY=your_primary_groq_key
@@ -339,7 +339,7 @@ VITE_CALLMEBOT_APIKEY=your_callmebot_key
 
 **WhatsApp setup (CallMeBot, free):** send `I allow callmebot to send me messages` to **+34 644 59 97 91** on WhatsApp; it replies with your API key. Without these, WhatsApp buttons fall back to `wa.me` deep links.
 
-> ⚠️ **Never commit `.env`.** Keys live in Vercel env vars only. If a key ever lands in a commit, rotating it isn't optional — deleting the file later does **not** remove it from git history.
+> ⚠️ **Never commit `.env`.** Keys live in Netlify env vars only. If a key ever lands in a commit, rotating it isn't optional — deleting the file later does **not** remove it from git history.
 
 ---
 
@@ -348,6 +348,6 @@ VITE_CALLMEBOT_APIKEY=your_callmebot_key
 **Built for how Indian businesses actually work.**
 *Six agents that don't share memory are still six silos. The Company Brain gives them one.*
 
-[![Live Demo](https://img.shields.io/badge/▶_Open_the_live_demo-1C7A93?style=for-the-badge)](https://hireflow-ai-liart.vercel.app)
+[![Live Demo](https://img.shields.io/badge/▶_Open_the_live_demo-1C7A93?style=for-the-badge)](https://nexflow-ai-india.netlify.app)
 
 </div>

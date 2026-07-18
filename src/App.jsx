@@ -430,7 +430,7 @@ function speak(text){
 }
 
 // ── WHATSAPP SEND (CallMeBot) ─────────────────────────────────────────────
-// Set VITE_CALLMEBOT_PHONE and VITE_CALLMEBOT_APIKEY in Vercel env vars.
+// Set VITE_CALLMEBOT_PHONE and VITE_CALLMEBOT_APIKEY in Netlify env vars.
 // Setup: send "I allow callmebot to send me messages" to +34 644 59 97 91 on WhatsApp.
 // CallMeBot will reply with your API key.
 async function sendWhatsAppReal(message){
@@ -3479,7 +3479,7 @@ function SalesMode(){
                     const fullMsg="Hi "+p.name.split(" ")[0]+"! 👋\n\n"+draft.slice(0,400)+"...\n\n— NexFlow AI";
                     const sent=await sendWhatsAppReal(fullMsg);
                     if(sent){toast("📲 WhatsApp message sent to your phone!","success");}
-                    else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Vercel for direct send","info");}
+                    else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Netlify for direct send","info");}
                     btn.disabled=false;btn.innerHTML="<span>📲</span> WhatsApp";
                   }} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"#DCFCE7",border:"1px solid #86EFAC",borderRadius:7,cursor:"pointer",color:"#15803D",display:"flex",alignItems:"center",gap:4}}>
                     <span>📲</span> WhatsApp
@@ -3919,7 +3919,7 @@ function CareMode(){
                     const fullMsg="नमस्ते "+selected.customer.split(" ")[0]+"! 🙏\n\n"+responses[selected.id].slice(0,500)+"\n\n— "+selected.company+" Support via NexFlow AI";
                     const sent=await sendWhatsAppReal(fullMsg);
                     if(sent){toast("📲 Response sent to your WhatsApp!","success");}
-                    else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Vercel for direct send","info");}
+                    else{window.open("https://wa.me/?text="+encodeURIComponent(fullMsg),"_blank");toast("Opening WhatsApp — add VITE_CALLMEBOT_PHONE & VITE_CALLMEBOT_APIKEY to Netlify for direct send","info");}
                     btn.disabled=false;btn.textContent="📲 Send on WhatsApp";
                   }} style={{fontSize:11,fontWeight:700,padding:"7px 14px",background:"#DCFCE7",border:"1px solid #86EFAC",borderRadius:9,cursor:"pointer",color:"#15803D",display:"flex",alignItems:"center",gap:6}}>
                     📲 Send on WhatsApp
@@ -5696,7 +5696,7 @@ function ApiKeyBanner(){
       <span style={{fontSize:18}}>⚠️</span>
       <div style={{flex:1}}>
         <div style={{fontSize:12,fontWeight:800,color:"white"}}>Groq API Key Missing — AI features disabled</div>
-        <div style={{fontSize:10,color:"rgba(255,255,255,0.8)"}}>Add VITE_GROQ_API_KEY to your .env file or Vercel environment variables, then redeploy.</div>
+        <div style={{fontSize:10,color:"rgba(255,255,255,0.8)"}}>Add VITE_GROQ_API_KEY to your .env file or Netlify environment variables, then redeploy.</div>
       </div>
       <button onClick={()=>setDismissed(true)} style={{background:"rgba(255,255,255,0.2)",border:"none",borderRadius:6,padding:"4px 10px",color:"white",fontSize:11,fontWeight:700,cursor:"pointer"}}>Dismiss</button>
     </div>
