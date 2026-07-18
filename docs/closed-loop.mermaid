@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph AGENTS["6 AI agents"]
+        H["HireFlow"]
+        S["SalesFlow"]
+        SUP["SupportFlow"]
+        C["CareFlow"]
+        SMB["SMB Brain"]
+        WR["War Room"]
+    end
+
+    subgraph BRAIN["Company Brain - shared memory"]
+        ID["Identity resolution (email to phone to name to account)"]
+        TL["Unified timeline"]
+        NBA["Deterministic next-best-action"]
+    end
+
+    H -- "writes events" --> BRAIN
+    S -- "writes events" --> BRAIN
+    SUP -- "writes events" --> BRAIN
+    C -- "writes events" --> BRAIN
+    SMB -- "writes events" --> BRAIN
+
+    BRAIN -- "reads memory before drafting" --> S
+    BRAIN -- "reads memory before replying" --> C
+
+    NBA -. "resolve complaint before upsell" .-> S
+    NBA -. "known customer - adjust tone" .-> C

@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useState, useEffect, useRef, useCallback, Component } from "react";
+import { createContext, useContext, useReducer, useState, useEffect, useRef, useCallback, useMemo, Component } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CANDIDATE_POOL, SAMPLE_INTERVIEW_QUESTIONS, detectDomain, getCandidatesForDomain } from "./SampleData.js";
 import { RESUME_BANK, getResumesByDomain } from "./ResumeBank.js";
@@ -17,10 +17,45 @@ import {
   saveSupportSession,
   saveCareTicket,
   loadCareTickets,
+  getMyEmployeeRecord,
+  createCompanyAndAdmin,
+  claimInviteIfAny,
+  inviteEmployee,
+  listEmployees,
+  updateEmployeeRole,
+  createCrossRoleSignal,
+  listCrossRoleSignals,
+  resolveCrossRoleSignal,
+  saveBrainEvent,
+  loadBrainEvents,
   DB_READY,
 } from "./lib/db.js";
+import { setAuthToken } from "./lib/supabase.js";
 import { createKeyRotator } from "./lib/groqKeyRotation.js";
 import { runIndiaComplianceCheck, formatComplianceFlags } from "./lib/indiaComplianceRules.js";
+import { estimatePipelineCost } from "./lib/costEstimator.js";
+import { createCompanyBrain } from "./lib/companyBrain.js";
+import { brainContextFor, salesAccountIntel } from "./lib/brainContext.js";
+import { createOutcomeLearner } from "./lib/outcomeLearning.js";
+
+// ── ROLE PERMISSIONS ────────────────────────────────────────────────────
+// Which app modes each employee role can see. Admin sees everything.
+// This is the UI-layer half of the access boundary; the RLS policies in
+// supabase_multitenancy.sql are the real, enforced half — this mapping
+// alone would not stop a determined user, it just keeps the nav honest
+// for the role someone actually has.
+const ROLE_MODE_ACCESS = {
+  admin: ["hiring", "sales", "support", "care", "smb", "warroom", "brain", "team"],
+  hiring_manager: ["hiring", "smb", "brain"],
+  sales_rep: ["sales", "smb", "brain"],
+  support_agent: ["support", "smb", "brain"],
+  care_agent: ["care", "smb", "brain"],
+};
+function modeAllowedForRole(modeId, role) {
+  if (!role) return true; // no employee record yet (e.g. demo mode) — don't block
+  const allowed = ROLE_MODE_ACCESS[role];
+  return allowed ? allowed.includes(modeId) : true;
+}
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────
 const EJS={svc:"service_f5hfgxa",tpl:"template_kcl0nki",key:"Yu7ThCT-UB7Kn7uc1"};
@@ -50,6 +85,7 @@ const initialState = {
   activeCandidates:CANDIDATE_POOL.slice(0,5), roleDomain:"general",
   candidateDecisions:{}, submittedResumes:[], resumeScoring:false,
   pipelineStep:"jd", appliedResumes:[], dynamicVerdicts:{},
+  employee:null, employeeLoading:true, team:[], crossSignals:[],
 };
 
 function reducer(s,a){
@@ -59,6 +95,9 @@ function reducer(s,a){
     case "TOGGLE_SIDEBAR": return{...s,sidebarOpen:!s.sidebarOpen};
     case "SET_JD": return{...s,jdText:a.payload};
     case "SET_PIPELINE": return{...s,pipelineState:a.payload};
+    case "SET_EMPLOYEE": return{...s,employee:a.payload,employeeLoading:false};
+    case "SET_TEAM": return{...s,team:a.payload};
+    case "SET_SIGNALS": return{...s,crossSignals:a.payload};
     case "SET_AGENT_STATUS": return{...s,agentStatuses:{...s.agentStatuses,[a.id]:a.status}};
     case "SET_AGENT_LOG": return{...s,agentLogs:{...s.agentLogs,[a.id]:a.log}};
     case "SET_AGENT_STREAM": return{...s,agentStreams:{...s.agentStreams,[a.id]:a.text}};
@@ -525,7 +564,18 @@ function StreamText({text,speed=18}){
   return<span>{shown}<span style={{animation:"blink 0.8s infinite"}}>|</span></span>;
 }
 function Spinner({color="#534AB7"}){return<div style={{width:14,height:14,border:"2px solid rgba(0,0,0,0.1)",borderTopColor:color,borderRadius:"50%",animation:"spin 0.7s linear infinite",flexShrink:0}}/>;}
-function ProgressBar({value,color="#534AB7",height=6}){return<div style={{height,background:"#EEECEA",borderRadius:999,overflow:"hidden"}}><div style={{height:"100%",width:value+"%",background:color,borderRadius:999,transition:"width 0.4s ease"}}/></div>;}
+function ProgressBar({value,color,height=7}){
+  const v=Math.max(0,Math.min(100,value||0));
+  const fill=color?`linear-gradient(90deg,${color},${color})`:"linear-gradient(90deg,#0D3B4F,#1C7A93 55%,#B8894A)";
+  const glow=color?color+"55":"rgba(28,122,147,0.45)";
+  return(
+    <div style={{height,background:"linear-gradient(180deg,#EAE1CE,#F1E9D8)",borderRadius:999,overflow:"hidden",boxShadow:"inset 0 1px 2px rgba(120,95,55,0.14)"}}>
+      <div style={{height:"100%",width:v+"%",background:fill,borderRadius:999,transition:"width 0.5s cubic-bezier(0.22,1,0.36,1)",position:"relative",boxShadow:`0 0 12px ${glow}`,overflow:"hidden"}}>
+        <div style={{position:"absolute",inset:0,background:"linear-gradient(90deg,transparent,rgba(255,255,255,0.45),transparent)",backgroundSize:"200% 100%",animation:v>0&&v<100?"shimmer 1.6s linear infinite":"none"}}/>
+      </div>
+    </div>
+  );
+}
 function Toast({msg,type,onClose}){
   useEffect(()=>{const t=setTimeout(onClose,4000);return()=>clearTimeout(t);},[]);
   const c={success:{bg:"#E1F5EE",border:"#9FE1CB",color:"#085041",icon:"✓"},error:{bg:"#FAECE7",border:"#F5B8A0",color:"#712B13",icon:"x"},info:{bg:"#EEEDFE",border:"#CECBF6",color:"#3C3489",icon:"i"},warn:{bg:"#FAEEDA",border:"#FAC775",color:"#633806",icon:"!"}}[type]||{bg:"#E1F5EE",border:"#9FE1CB",color:"#085041",icon:"✓"};
@@ -794,14 +844,21 @@ function HomeScreen(){
     setDemoRunning(false);
   };
 
+  // AI systems in a sensible flow: SMB Brain first (the recommended start), then the
+  // four operational agents, then War Room, then the Company Brain that ties them together.
   const modes=[
+    {id:"smb",icon:"🏪",title:"SMB Brain",sub:"Business Intelligence",desc:"Paste raw WhatsApp messages. AI extracts every customer, builds your CRM, FAQ and sales pipeline automatically.",color:"#8B5CF6",glow:"rgba(139,92,246,0.18)",chip:"WhatsApp CRM · tier-2 India · ROI"},
     {id:"hiring",icon:"🧠",title:"HireFlow AI",sub:"Hiring Intelligence",desc:"7 AI agents rank resumes, draft outreach emails, generate interview questions and audit bias — from a single JD paste.",color:"#6D5FFA",glow:"rgba(109,95,250,0.18)",chip:"7 agents · real scoring · bias audit"},
     {id:"sales",icon:"🎯",title:"SalesFlow AI",sub:"Autonomous Sales",desc:"AI builds Indian B2B prospect lists, writes personalized cold emails, and handles live objections — even in Hindi.",color:"#F59E0B",glow:"rgba(245,158,11,0.18)",chip:"Prospects · cold email · objection AI"},
     {id:"support",icon:"💬",title:"SupportFlow AI",sub:"Support Intelligence",desc:"Paste your docs once. AI builds a knowledge base and answers every customer question using only your content.",color:"#10B981",glow:"rgba(16,185,129,0.18)",chip:"KB builder · sentiment · CSAT"},
     {id:"care",icon:"❤️",title:"CareFlow AI",sub:"Customer Care",desc:"AI reads tickets, scores urgency, picks the right tone, and drafts replies. You approve before anything sends.",color:"#F43F5E",glow:"rgba(244,63,94,0.18)",chip:"Triage · SLA timer · human approval"},
-    {id:"smb",icon:"🏪",title:"SMB Brain",sub:"Business Intelligence",desc:"Paste raw WhatsApp messages. AI extracts every customer, builds your CRM, FAQ and sales pipeline automatically.",color:"#8B5CF6",glow:"rgba(139,92,246,0.18)",chip:"WhatsApp CRM · tier-2 India · ROI"},
-    {id:"warroom",icon:"⚡",title:"AI War Room",sub:"Multi-Agent Control",desc:"All six systems fire simultaneously. Agents debate, hand off work to each other, and produce one unified report.",color:"#0EA5E9",glow:"rgba(14,165,233,0.18)",chip:"Parallel · cross-agent · live debates"},
+    {id:"warroom",icon:"⚡",title:"AI War Room",sub:"Multi-Agent Control",desc:"Every operational agent fires simultaneously. Agents debate, hand off work to each other, and produce one unified report.",color:"#0EA5E9",glow:"rgba(14,165,233,0.18)",chip:"Parallel · cross-agent · live debates"},
+    {id:"brain",icon:"🧩",title:"Company Brain",sub:"Shared Memory",desc:"One memory every agent shares. The same person seen by sales and support becomes one record — and the Brain tells you the cross-team move to make next.",color:"#1C7A93",glow:"rgba(28,122,147,0.20)",chip:"Identity resolution · timeline · next-best-action"},
   ];
+  // Team is NOT an AI system — it's an admin feature. Kept separate on purpose.
+  const teamMode={id:"team",icon:"👥",title:"Team",sub:"Admin feature — not AI",desc:"Invite employees, assign roles, and see who has access to what across your company.",color:"#64748B",glow:"rgba(100,116,139,0.18)",chip:"Invite · roles · access"};
+  const visibleModes=modes.filter(m=>modeAllowedForRole(m.id,state.employee?.role));
+  const showTeam=modeAllowedForRole("team",state.employee?.role);
 
   const proof=[
     {icon:"🤖",stat:"Zero",label:"hardcoded AI responses"},
@@ -811,43 +868,45 @@ function HomeScreen(){
   ];
 
   return(
-    <div style={{minHeight:"100vh",fontFamily:"Inter,system-ui,sans-serif",background:"#09090B",overflowX:"hidden"}}>
+    <div style={{minHeight:"100vh",fontFamily:"Inter,system-ui,sans-serif",background:"radial-gradient(130% 90% at 50% -10%,#F8F2E4 0%,#F0E7D5 52%,#F5EEDF 100%)",overflowX:"hidden"}}>
 
-      {/* ── DARK HERO ───────────────────────────────────── */}
-      <div style={{position:"relative",overflow:"hidden",padding:"0 28px 64px"}}>
-        {/* Glow orbs */}
-        <div style={{position:"absolute",top:-120,left:"50%",transform:"translateX(-50%)",width:600,height:600,borderRadius:"50%",background:"radial-gradient(circle,rgba(109,95,250,0.25) 0%,transparent 70%)",pointerEvents:"none"}}/>
-        <div style={{position:"absolute",top:80,left:"10%",width:300,height:300,borderRadius:"50%",background:"radial-gradient(circle,rgba(14,165,233,0.12) 0%,transparent 70%)",pointerEvents:"none"}}/>
-        <div style={{position:"absolute",top:40,right:"8%",width:280,height:280,borderRadius:"50%",background:"radial-gradient(circle,rgba(244,63,94,0.1) 0%,transparent 70%)",pointerEvents:"none"}}/>
+      {/* ── PREMIUM CREAM HERO ───────────────────────────────────── */}
+      <div style={{position:"relative",overflow:"hidden",padding:"0 28px 72px"}}>
+        {/* Warm ambient glow */}
+        <div style={{position:"absolute",top:-160,left:"50%",transform:"translateX(-50%)",width:820,height:620,borderRadius:"50%",background:"radial-gradient(circle,rgba(212,178,120,0.28) 0%,transparent 68%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",top:120,left:"6%",width:320,height:320,borderRadius:"50%",background:"radial-gradient(circle,rgba(28,122,147,0.10) 0%,transparent 70%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",top:60,right:"6%",width:300,height:300,borderRadius:"50%",background:"radial-gradient(circle,rgba(184,137,74,0.12) 0%,transparent 70%)",pointerEvents:"none"}}/>
+        {/* Fine dotted texture */}
+        <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(rgba(120,95,55,0.06) 1px,transparent 1px)",backgroundSize:"22px 22px",pointerEvents:"none",maskImage:"linear-gradient(180deg,black 0%,transparent 85%)",WebkitMaskImage:"linear-gradient(180deg,black 0%,transparent 85%)"}}/>
 
         {/* Nav */}
-        <div className="hero-nav" style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:22,position:"relative",zIndex:2}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:36,height:36,borderRadius:10,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 0 20px rgba(109,95,250,0.5)"}}>⚡</div>
+        <div className="hero-nav" style={{maxWidth:1080,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:24,position:"relative",zIndex:2}}>
+          <div style={{display:"flex",alignItems:"center",gap:11}}>
+            <div style={{width:38,height:38,borderRadius:11,background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,boxShadow:"0 6px 18px rgba(13,59,79,0.28)"}}>⚡</div>
             <div>
-              <div style={{fontSize:15,fontWeight:900,color:"white",letterSpacing:"-0.01em"}}>NexFlow AI</div>
-              <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",fontWeight:500}}>Multi-Agent Platform</div>
+              <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:18,fontWeight:800,color:"#211E19",letterSpacing:"-0.01em"}}>NexFlow AI</div>
+              <div style={{fontSize:10,color:"#8A7B63",fontWeight:600,letterSpacing:"0.04em"}}>Multi-Agent Platform</div>
             </div>
           </div>
-          <div className="hero-nav-buttons" style={{display:"flex",gap:10,alignItems:"center"}}>
-            <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:22,padding:"6px 14px"}}>
-              <div style={{width:6,height:6,borderRadius:"50%",background:"#22C55E",boxShadow:"0 0 0 3px rgba(34,197,94,0.25)",animation:"pulse 2s infinite"}}/>
-              <span style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.7)",letterSpacing:"0.06em"}}>ALL SYSTEMS ONLINE</span>
+          <div className="hero-nav-buttons" style={{display:"flex",gap:9,alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,background:"rgba(255,253,248,0.7)",border:"1px solid rgba(120,95,55,0.16)",borderRadius:22,padding:"6px 14px",backdropFilter:"blur(6px)"}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:"#1C9E75",boxShadow:"0 0 0 3px rgba(28,158,117,0.2)",animation:"pulse 2s infinite"}}/>
+              <span style={{fontSize:10,fontWeight:700,color:"#6B6355",letterSpacing:"0.06em"}}>ALL SYSTEMS ONLINE</span>
             </div>
             <button onClick={()=>dispatch({type:"TOGGLE_HINDI"})}
               title={state.hindiMode?"Switch to English":"Switch to Hindi / हिंदी"}
-              style={{padding:"7px 12px",background:state.hindiMode?"rgba(124,58,237,0.5)":"rgba(255,255,255,0.07)",border:"1px solid "+(state.hindiMode?"rgba(124,58,237,0.8)":"rgba(255,255,255,0.15)"),borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",color:"white",transition:"all 0.2s"}}>
+              style={{padding:"7px 12px",background:state.hindiMode?"#0D3B4F":"rgba(255,253,248,0.7)",border:"1px solid "+(state.hindiMode?"#0D3B4F":"rgba(120,95,55,0.18)"),borderRadius:20,fontSize:11,fontWeight:700,cursor:"pointer",color:state.hindiMode?"#F5EEDF":"#4A4235",transition:"all 0.2s"}}>
               {state.hindiMode?"🌐 EN":"🇮🇳 HI"}
             </button>
             <button onClick={()=>dispatch({type:"TOGGLE_DARK"})}
               title={state.darkMode?"Light mode":"Dark mode"}
-              style={{padding:"7px 10px",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:20,fontSize:13,cursor:"pointer",transition:"all 0.15s"}}>
+              style={{padding:"7px 10px",background:"rgba(255,253,248,0.7)",border:"1px solid rgba(120,95,55,0.18)",borderRadius:20,fontSize:13,cursor:"pointer",transition:"all 0.15s"}}>
               {state.darkMode?"☀️":"🌙"}
             </button>
             <button onClick={()=>dispatch({type:"SET_MODE",payload:"overview"})}
-              style={{padding:"7px 16px",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",color:"rgba(255,255,255,0.8)",transition:"all 0.15s"}}
-              onMouseEnter={e=>{e.currentTarget.style.background="rgba(109,95,250,0.25)";e.currentTarget.style.borderColor="rgba(109,95,250,0.6)";e.currentTarget.style.color="white";}}
-              onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.07)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";e.currentTarget.style.color="rgba(255,255,255,0.8)";}}>
+              style={{padding:"7px 16px",background:"rgba(255,253,248,0.7)",border:"1px solid rgba(120,95,55,0.18)",borderRadius:20,fontSize:11,fontWeight:600,cursor:"pointer",color:"#4A4235",transition:"all 0.15s"}}
+              onMouseEnter={e=>{e.currentTarget.style.background="#211E19";e.currentTarget.style.borderColor="#211E19";e.currentTarget.style.color="#F5EEDF";}}
+              onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,253,248,0.7)";e.currentTarget.style.borderColor="rgba(120,95,55,0.18)";e.currentTarget.style.color="#4A4235";}}>
               Features & Docs
             </button>
             <UserChip/>
@@ -855,65 +914,65 @@ function HomeScreen(){
         </div>
 
         {/* Hero */}
-        <div style={{maxWidth:1080,margin:"60px auto 0",textAlign:"center",position:"relative",zIndex:2}}>
+        <div style={{maxWidth:1080,margin:"66px auto 0",textAlign:"center",position:"relative",zIndex:2}}>
           <motion.div initial={{opacity:0,y:16}} animate={{opacity:1,y:0}} transition={{duration:0.5}}
-            style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(109,95,250,0.15)",border:"1px solid rgba(109,95,250,0.4)",borderRadius:22,padding:"6px 16px",marginBottom:28}}>
+            style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,253,248,0.85)",border:"1px solid rgba(184,137,74,0.4)",borderRadius:22,padding:"7px 18px",marginBottom:30,boxShadow:"0 2px 10px rgba(120,95,55,0.06)"}}>
             <span style={{fontSize:13}}>🇮🇳</span>
-            <span style={{fontSize:11,fontWeight:700,color:"#A78BFA",letterSpacing:"0.02em"}}>Built for how Indian businesses actually work</span>
+            <span style={{fontSize:11,fontWeight:700,color:"#9A6A2E",letterSpacing:"0.03em"}}>Built for how Indian businesses actually work</span>
           </motion.div>
 
           <motion.h1 initial={{opacity:0,y:22}} animate={{opacity:1,y:0}} transition={{duration:0.55,delay:0.08}}
-            className="hero-h1" style={{fontSize:58,fontWeight:900,lineHeight:1.06,letterSpacing:"-0.035em",color:"white",marginBottom:20,maxWidth:740,margin:"0 auto 20px"}}>
-            Six AI agents.<br/>
-            <span style={{background:"linear-gradient(90deg,#6D5FFA,#A78BFA,#60A5FA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>One platform.</span>
+            className="hero-h1" style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:66,fontWeight:800,lineHeight:1.04,letterSpacing:"-0.02em",color:"#211E19",maxWidth:820,margin:"0 auto 22px"}}>
+            Seven AI systems.<br/>
+            <span style={{fontStyle:"italic",fontWeight:600,background:"linear-gradient(100deg,#0D3B4F,#1C7A93,#B8894A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>One quiet platform.</span>
           </motion.h1>
 
           <motion.p initial={{opacity:0,y:14}} animate={{opacity:1,y:0}} transition={{duration:0.48,delay:0.16}}
-            style={{fontSize:16,color:"rgba(255,255,255,0.52)",lineHeight:1.8,maxWidth:520,margin:"0 auto 40px"}}>
+            style={{fontSize:16.5,color:"#6B6355",lineHeight:1.75,maxWidth:540,margin:"0 auto 42px"}}>
             Hiring, sales, support, care, SMB intelligence, and a live agent War Room — all running simultaneously, all powered by real AI.
           </motion.p>
 
           {/* Guided path */}
           <motion.div initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{duration:0.44,delay:0.24}}
-            style={{marginBottom:40}}>
+            style={{marginBottom:44}}>
             {/* "Best demo path" strip */}
-            <div style={{background:"rgba(139,92,246,0.12)",border:"1.5px solid rgba(139,92,246,0.35)",borderRadius:14,padding:"14px 22px",marginBottom:16,maxWidth:640,margin:"0 auto 16px"}}>
-              <div style={{fontSize:10,fontWeight:800,color:"#A78BFA",letterSpacing:"0.1em",textTransform:"uppercase",marginBottom:10}}>✦ Best demo path — follow in order</div>
+            <div style={{background:"rgba(255,253,248,0.72)",border:"1px solid rgba(184,137,74,0.28)",borderRadius:16,padding:"16px 24px",marginBottom:18,maxWidth:660,margin:"0 auto 18px",boxShadow:"0 8px 30px rgba(120,95,55,0.07)",backdropFilter:"blur(8px)"}}>
+              <div style={{fontSize:10,fontWeight:800,color:"#9A6A2E",letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:12}}>✦ Best demo path — follow in order</div>
               <div style={{display:"flex",alignItems:"center",gap:0,flexWrap:"wrap",justifyContent:"center"}}>
-                {[{step:1,icon:"🏪",label:"SMB Brain",id:"smb",color:"#8B5CF6"},{step:2,icon:"🎯",label:"SalesFlow",id:"sales",color:"#F59E0B"},{step:3,icon:"❤️",label:"CareFlow",id:"care",color:"#F43F5E"},{step:4,icon:"⚡",label:"War Room",id:"warroom",color:"#0EA5E9"}].map((s,i,arr)=>(
+                {[{step:1,icon:"🏪",label:"SMB Brain",id:"smb",color:"#8B5CF6"},{step:2,icon:"🎯",label:"SalesFlow",id:"sales",color:"#B8894A"},{step:3,icon:"❤️",label:"CareFlow",id:"care",color:"#C0546F"},{step:4,icon:"⚡",label:"War Room",id:"warroom",color:"#1C7A93"}].map((s,i,arr)=>(
                   <div key={s.id} style={{display:"flex",alignItems:"center",gap:0}}>
                     <button onClick={()=>dispatch({type:"SET_MODE",payload:s.id})}
-                      style={{display:"flex",alignItems:"center",gap:7,background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,padding:"7px 14px",cursor:"pointer",transition:"all 0.15s",fontSize:12,fontWeight:700,color:"white"}}
-                      onMouseEnter={e=>{e.currentTarget.style.background=s.color+"30";e.currentTarget.style.borderColor=s.color+"80";}}
-                      onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.08)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";}}>
-                      <span style={{fontSize:10,fontWeight:900,color:s.color,background:s.color+"20",borderRadius:"50%",width:18,height:18,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{s.step}</span>
+                      style={{display:"flex",alignItems:"center",gap:7,background:"#FFFDF8",border:"1px solid rgba(120,95,55,0.16)",borderRadius:10,padding:"8px 14px",cursor:"pointer",transition:"all 0.15s",fontSize:12,fontWeight:700,color:"#3A342A"}}
+                      onMouseEnter={e=>{e.currentTarget.style.background=s.color+"14";e.currentTarget.style.borderColor=s.color+"66";}}
+                      onMouseLeave={e=>{e.currentTarget.style.background="#FFFDF8";e.currentTarget.style.borderColor="rgba(120,95,55,0.16)";}}>
+                      <span style={{fontSize:10,fontWeight:900,color:s.color,background:s.color+"1E",borderRadius:"50%",width:18,height:18,display:"inline-flex",alignItems:"center",justifyContent:"center"}}>{s.step}</span>
                       <span>{s.icon}</span>
                       <span>{s.label}</span>
                     </button>
-                    {i<arr.length-1&&<div style={{color:"rgba(255,255,255,0.25)",fontSize:14,padding:"0 4px"}}>→</div>}
+                    {i<arr.length-1&&<div style={{color:"rgba(120,95,55,0.35)",fontSize:14,padding:"0 4px"}}>→</div>}
                   </div>
                 ))}
               </div>
             </div>
             {/* Primary CTA */}
             <div className="hero-ctas" style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
-              {/* AUTO-DEMO — the big one */}
+              {/* AUTO-DEMO — the big one, dark premium pill */}
               <button onClick={runAutoDemo} disabled={demoRunning}
-                style={{padding:"13px 28px",background:demoRunning?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#F59E0B,#EF4444,#8B5CF6)",backgroundSize:"200% 200%",animation:demoRunning?"none":"gradient-shift 3s ease infinite",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:demoRunning?"not-allowed":"pointer",boxShadow:demoRunning?"none":"0 0 40px rgba(245,158,11,0.5)",transition:"all 0.2s",display:"flex",alignItems:"center",gap:8}}
-                onMouseEnter={e=>{if(!demoRunning){e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 0 56px rgba(245,158,11,0.7)";}}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=demoRunning?"none":"0 0 40px rgba(245,158,11,0.5)";}}>
-                {demoRunning?<><Spinner color="white"/>Loading demo...</>:"▶ Auto-Demo — see everything in 8 seconds"}
+                style={{padding:"14px 30px",background:demoRunning?"#8A7B63":"#211E19",border:"none",borderRadius:999,fontSize:14,fontWeight:700,color:"#F5EEDF",cursor:demoRunning?"not-allowed":"pointer",boxShadow:demoRunning?"none":"0 10px 30px rgba(33,30,25,0.28)",transition:"all 0.2s",display:"flex",alignItems:"center",gap:8}}
+                onMouseEnter={e=>{if(!demoRunning){e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.boxShadow="0 16px 40px rgba(33,30,25,0.38)";}}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow=demoRunning?"none":"0 10px 30px rgba(33,30,25,0.28)";}}>
+                {demoRunning?<><Spinner color="#F5EEDF"/>Loading demo...</>:"▶ Auto-Demo — see everything in 8 seconds"}
               </button>
               <button onClick={()=>dispatch({type:"SET_MODE",payload:"smb"})}
-                style={{padding:"13px 24px",background:"linear-gradient(135deg,#8B5CF6,#6D5FFA)",border:"none",borderRadius:12,fontSize:14,fontWeight:800,color:"white",cursor:"pointer",boxShadow:"0 0 32px rgba(139,92,246,0.45)",transition:"all 0.2s"}}
+                style={{padding:"14px 26px",background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",border:"none",borderRadius:999,fontSize:14,fontWeight:700,color:"#F5F8F8",cursor:"pointer",boxShadow:"0 10px 26px rgba(13,59,79,0.26)",transition:"all 0.2s"}}
                 onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";}}
                 onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";}}>
                 🏪 SMB Brain →
               </button>
               <button onClick={()=>dispatch({type:"SET_MODE",payload:"warroom"})}
-                style={{padding:"13px 24px",background:"rgba(255,255,255,0.05)",border:"1.5px solid rgba(255,255,255,0.18)",borderRadius:12,fontSize:14,fontWeight:700,color:"rgba(255,255,255,0.85)",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(14,165,233,0.6)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(255,255,255,0.18)";}}>
+                style={{padding:"14px 26px",background:"rgba(255,253,248,0.7)",border:"1px solid rgba(120,95,55,0.22)",borderRadius:999,fontSize:14,fontWeight:700,color:"#3A342A",cursor:"pointer",transition:"all 0.2s",backdropFilter:"blur(8px)"}}
+                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-2px)";e.currentTarget.style.borderColor="rgba(28,122,147,0.55)";}}
+                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.borderColor="rgba(120,95,55,0.22)";}}>
                 ⚡ War Room
               </button>
             </div>
@@ -923,11 +982,11 @@ function HomeScreen(){
           <motion.div initial={{opacity:0}} animate={{opacity:1}} transition={{duration:0.5,delay:0.38}}
             style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
             {proof.map((p,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:10,padding:"10px 16px"}}>
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,253,248,0.66)",border:"1px solid rgba(120,95,55,0.14)",borderRadius:12,padding:"10px 16px",backdropFilter:"blur(6px)"}}>
                 <span style={{fontSize:16}}>{p.icon}</span>
                 <div style={{textAlign:"left"}}>
-                  <div style={{fontSize:13,fontWeight:800,color:"white",lineHeight:1}}>{p.stat}</div>
-                  <div style={{fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2}}>{p.label}</div>
+                  <div style={{fontSize:13,fontWeight:800,color:"#211E19",lineHeight:1}}>{p.stat}</div>
+                  <div style={{fontSize:10,color:"#8A7B63",marginTop:2}}>{p.label}</div>
                 </div>
               </div>
             ))}
@@ -939,26 +998,33 @@ function HomeScreen(){
       <AgentNetworkViz crossEvents={state.crossEvents} onNodeClick={(id)=>dispatch({type:"SET_MODE",payload:id})}/>
 
       {/* ── MODE CARDS ──────────────────────────────────────── */}
-      <div className="mode-cards-section" style={{background:"#FAFAFA",borderTop:"1px solid rgba(255,255,255,0.06)",padding:"56px 28px 48px"}}>
+      <div className="mode-cards-section" style={{background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderTop:"1px solid rgba(120,95,55,0.1)",padding:"56px 28px 48px"}}>
         <div style={{maxWidth:1080,margin:"0 auto"}}>
           <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{duration:0.4,delay:0.28}}
             style={{textAlign:"center",marginBottom:40}}>
-            <div style={{fontSize:11,fontWeight:800,color:"#9CA3AF",letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:10}}>Choose your agent</div>
-            <div style={{fontSize:28,fontWeight:900,color:"#111827",letterSpacing:"-0.025em"}}>6 AI systems. Pick one to start.</div>
+            <div style={{fontSize:11,fontWeight:800,color:"#9A6A2E",letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:10}}>Choose your agent</div>
+            <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:34,fontWeight:800,color:"#211E19",letterSpacing:"-0.01em"}}>Seven AI systems. Pick one to start.</div>
+            <div style={{display:"inline-flex",alignItems:"center",gap:8,marginTop:14,background:"rgba(255,253,248,0.85)",border:"1px solid rgba(184,137,74,0.35)",borderRadius:999,padding:"7px 18px",fontSize:13,fontWeight:700,color:"#3A342A"}}>
+              <span>6 agents</span>
+              <span style={{color:"#9A6A2E",fontWeight:800}}>+</span>
+              <span>the Company Brain</span>
+              <span style={{color:"#9A6A2E",fontWeight:800}}>=</span>
+              <span style={{background:"linear-gradient(100deg,#0D3B4F,#1C7A93,#B8894A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",fontWeight:900}}>7 AI</span>
+            </div>
           </motion.div>
 
           <div className="home-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
-            {modes.map((m,i)=>{const isStart=m.id==="smb";return(
+            {visibleModes.map((m,i)=>{const isStart=m.id==="smb";return(
               <motion.div key={m.id}
                 initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}
                 transition={{duration:0.4,delay:0.08+i*0.06}}
                 onClick={()=>dispatch({type:"SET_MODE",payload:m.id})}
-                style={{background:"white",borderRadius:16,border:isStart?"2px solid #8B5CF6":"1.5px solid #F1F1F1",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:isStart?"0 4px 24px rgba(139,92,246,0.18)":"0 2px 8px rgba(0,0,0,0.04)"}}
+                style={{background:"#FFFDF8",borderRadius:16,border:isStart?"1.5px solid #C79A57":"1px solid rgba(120,95,55,0.14)",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:isStart?"0 10px 30px rgba(184,137,74,0.18)":"0 2px 10px rgba(120,95,55,0.05)"}}
                 whileHover={{y:-5,boxShadow:`0 16px 40px ${m.glow}`,borderColor:m.color+"55"}}>
 
                 {/* Left color bar */}
                 <div style={{position:"absolute",left:0,top:0,bottom:0,width:3,background:m.color,borderRadius:"16px 0 0 16px",opacity:0.7}}/>
-                {isStart&&<div style={{position:"absolute",top:12,right:12,background:"linear-gradient(135deg,#8B5CF6,#6D5FFA)",color:"white",fontSize:9,fontWeight:900,padding:"3px 9px",borderRadius:20,letterSpacing:"0.06em"}}>START HERE</div>}
+                {isStart&&<div style={{position:"absolute",top:12,right:12,display:"flex",alignItems:"center",gap:5,background:"#211E19",color:"#F5EEDF",fontSize:9,fontWeight:800,padding:"4px 11px 4px 9px",borderRadius:999,letterSpacing:"0.1em",boxShadow:"0 3px 10px rgba(33,30,25,0.25)"}}><span style={{width:5,height:5,borderRadius:"50%",background:"#E0B463",boxShadow:"0 0 0 2px rgba(224,180,99,0.3)"}}/>START HERE</div>}
 
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,paddingLeft:8}}>
                   <div style={{width:44,height:44,borderRadius:12,background:m.color+"14",border:`1.5px solid ${m.color}30`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
@@ -979,8 +1045,71 @@ function HomeScreen(){
               </motion.div>
             );})}
         </div>
+
+        {/* ── NON-AI ADMIN FEATURE (kept separate from the 7 AI systems) ── */}
+        {showTeam&&(
+          <div style={{maxWidth:1080,margin:"32px auto 0"}}>
+            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
+              <div style={{flex:1,height:1,background:"rgba(120,95,55,0.16)"}}/>
+              <div style={{fontSize:10,fontWeight:800,color:"#8A7B63",letterSpacing:"0.12em",textTransform:"uppercase",whiteSpace:"nowrap"}}>Not an AI system — admin feature</div>
+              <div style={{flex:1,height:1,background:"rgba(120,95,55,0.16)"}}/>
+            </div>
+            <motion.div initial={{opacity:0,y:14}} whileInView={{opacity:1,y:0}} viewport={{once:true}} transition={{duration:0.4}}
+              onClick={()=>dispatch({type:"SET_MODE",payload:teamMode.id})}
+              style={{maxWidth:520,margin:"0 auto",display:"flex",alignItems:"center",gap:16,background:"rgba(241,239,232,0.6)",border:"1px dashed rgba(120,95,55,0.3)",borderRadius:16,padding:"18px 22px",cursor:"pointer",transition:"all 0.2s"}}
+              whileHover={{y:-3,background:"rgba(241,239,232,0.9)",borderColor:"rgba(120,95,55,0.45)"}}>
+              <div style={{width:46,height:46,borderRadius:12,background:"#64748B18",border:"1.5px solid #64748B33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>{teamMode.icon}</div>
+              <div style={{flex:1}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:14,fontWeight:800,color:"#111827"}}>{teamMode.title}</span>
+                  <span style={{fontSize:9,fontWeight:800,color:"#5F5E5A",background:"#E5E3DB",borderRadius:20,padding:"2px 8px",letterSpacing:"0.04em"}}>ADMIN · NO AI</span>
+                </div>
+                <div style={{fontSize:12,color:"#6B7280",lineHeight:1.6,marginTop:4}}>{teamMode.desc}</div>
+              </div>
+              <div style={{width:28,height:28,borderRadius:8,background:"#64748B14",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,color:"#64748B",fontWeight:800,flexShrink:0}}>→</div>
+            </motion.div>
+          </div>
+        )}
       </div>
     </div>
+
+      {/* ── FEATURE SHOWCASE ─────────────────────────────────── */}
+      <div className="feature-showcase-section" style={{background:"#0B0B0D",padding:"64px 28px 60px",borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+        <div style={{maxWidth:1080,margin:"0 auto"}}>
+          <motion.div initial={{opacity:0,y:10}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:"-80px"}} transition={{duration:0.4}}
+            style={{textAlign:"center",marginBottom:44}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#8B5CF6",letterSpacing:"0.14em",textTransform:"uppercase",marginBottom:10}}>What's actually under the hood</div>
+            <div style={{fontSize:28,fontWeight:900,color:"white",letterSpacing:"-0.025em",marginBottom:10}}>Not just an LLM wrapper</div>
+            <div style={{fontSize:13.5,color:"rgba(255,255,255,0.45)",maxWidth:560,margin:"0 auto",lineHeight:1.6}}>
+              Deterministic checks, cost transparency, and resilience — the parts that don't show up in a screenshot but decide whether this survives production.
+            </div>
+          </motion.div>
+
+          <div className="feature-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14}}>
+            {[
+              {icon:"🇮🇳",title:"India Compliance Engine",live:true,desc:"Every job description is checked against the Equal Remuneration Act 1976, POSH Act 2013, and Code on Wages — deterministic regex rules, not an LLM guessing.",where:"Live in HireFlow → Bias Detector"},
+              {icon:"🧮",title:"PAN / GSTIN / Udyam Verification",live:false,desc:"Real checksum validation — including the mod-36 GSTIN check-digit algorithm — not just format regex. Built and unit-tested, not yet wired into a screen.",where:"lib/indianVerification.js — backend only"},
+              {icon:"🔁",title:"Zero-Downtime Key Rotation",live:true,desc:"If a Groq API key dies mid-demo, requests silently retry against the next key instead of the whole pipeline failing on a 401.",where:"Live — powers every AI call"},
+              {icon:"💰",title:"Real Cost Transparency",live:true,desc:"Every Groq call is metered by actual token count and priced at Groq's published rates — the hiring report shows real ₹ cost, not a marketing estimate.",where:"Live in HireFlow → Report"},
+              {icon:"🔒",title:"DPDP Act Data Deletion",live:false,desc:"One call erases a user's data across every table (pipeline runs, candidates, outreach, sessions, tickets) — required for India's Digital Personal Data Protection Act, 2023.",where:"lib/db.js:deleteAllUserData — no settings UI yet"},
+              {icon:"📈",title:"Self-Improving Outreach",live:false,desc:"Tracks which message openings actually get replies and surfaces the top/worst performing patterns over time — frequency-weighted, not reinforcement learning.",where:"lib/outcomeLearning.js — not wired to a screen"},
+            ].map((f,i)=>(
+              <motion.div key={i} initial={{opacity:0,y:16}} whileInView={{opacity:1,y:0}} viewport={{once:true,margin:"-40px"}} transition={{duration:0.35,delay:i*0.05}}
+                style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,padding:"20px 20px 18px",position:"relative"}}>
+                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:10}}>
+                  <div style={{width:38,height:38,borderRadius:10,background:"rgba(139,92,246,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{f.icon}</div>
+                  <div style={{fontSize:9,fontWeight:800,letterSpacing:"0.05em",textTransform:"uppercase",padding:"3px 8px",borderRadius:20,background:f.live?"rgba(34,197,94,0.14)":"rgba(255,255,255,0.06)",color:f.live?"#4ADE80":"rgba(255,255,255,0.4)",border:f.live?"1px solid rgba(34,197,94,0.3)":"1px solid rgba(255,255,255,0.1)"}}>
+                    {f.live?"Live in demo":"Built, not wired"}
+                  </div>
+                </div>
+                <div style={{fontSize:14,fontWeight:800,color:"white",marginBottom:6,letterSpacing:"-0.01em"}}>{f.title}</div>
+                <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",lineHeight:1.65,marginBottom:12}}>{f.desc}</div>
+                <div style={{fontSize:10.5,color:"rgba(255,255,255,0.3)",fontWeight:600,fontFamily:"monospace"}}>{f.where}</div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </div>
 
       {/* ── CROSS-MODE SIGNALS ──────────────────────────────── */}
       {state.crossEvents.length>0&&(
@@ -1216,7 +1345,7 @@ function ApprovalModal({candidate:c,onClose}){
                 <div style={{fontSize:14,fontWeight:800,color:"#1C1C1A"}}>Outreach to {c.name}</div>
                 <div style={{fontSize:11,color:candEmail?"#888780":"#D85A30"}}>{candEmail||"No email on file"}</div>
               </div>
-              <button onClick={onClose} style={{background:"#F7F6F3",border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",fontSize:16,color:"#888780",display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
+              <button onClick={onClose} style={{background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",border:"none",borderRadius:"50%",width:28,height:28,cursor:"pointer",fontSize:16,color:"#888780",display:"flex",alignItems:"center",justifyContent:"center"}}>×</button>
             </div>
 
             <div style={{background:"#FAEEDA",border:"1px solid #FAC775",borderRadius:9,padding:"9px 13px",marginBottom:12,fontSize:12,fontWeight:600,color:"#633806"}}>⚠️ Human-in-the-loop — review before sending</div>
@@ -1230,7 +1359,7 @@ function ApprovalModal({candidate:c,onClose}){
             )}
 
             {/* Recipient field — always visible and editable */}
-            <div style={{background:"#F7F6F3",borderRadius:10,border:"1px solid #EEECEA",padding:"10px 14px",marginBottom:12}}>
+            <div style={{background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderRadius:10,border:"1px solid #EEECEA",padding:"10px 14px",marginBottom:12}}>
               <div style={{fontSize:10,fontWeight:700,color:"#888780",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>Send to</div>
               <input
                 value={demoEmail||candEmail}
@@ -1257,7 +1386,7 @@ function ApprovalModal({candidate:c,onClose}){
             <div style={{fontSize:18,fontWeight:800,color:"#1C1C1A",marginBottom:4}}>Email sent to {c.name}</div>
             <div style={{fontSize:12,color:"#888780",marginBottom:4}}>Delivered to: {demoEmail||candEmail}</div>
             <div style={{fontSize:11,color:"#888780",marginBottom:20}}>They will receive your outreach shortly.</div>
-            <div style={{background:"#F7F6F3",borderRadius:10,padding:14,marginBottom:20,textAlign:"left"}}>
+            <div style={{background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderRadius:10,padding:14,marginBottom:20,textAlign:"left"}}>
               <div style={{fontSize:10,fontWeight:700,color:"#888780",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>Email sent</div>
               <div style={{fontSize:12,color:"#5F5E5A",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{draft}</div>
             </div>
@@ -1409,7 +1538,7 @@ function HiringDashboard(){
 }
 
 // ── REAL AI AGENT PIPELINE ────────────────────────────────────────────────
-async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[], userId=null){
+async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[], userId=null, companyId=null){
   dispatch({type:"RESET_PIPELINE"});
   dispatch({type:"SET_PIPELINE",payload:"running"});
   toast("7 AI agents activated — analyzing your actual JD","info");
@@ -1633,9 +1762,18 @@ async function runRealAgentPipeline(jdText, dispatch, toast, appliedResumes=[], 
     candidates:domainCandidates.map(c=>({...c,score:scoreMap[c.id]||c.baseScore||75})),
     totalResumes:appliedResumes.length||domainCandidates.length,
     ...(userId&&{user_id:userId}),
+    ...(companyId&&{company_id:companyId}),
   }).then(runId=>{
     if(runId) dispatch({type:"SET_DB_RUN_ID",payload:runId});
   });
+  // Cross-role signal: candidates the hiring manager marks "pass" become a real,
+  // company-visible onboarding item a Support/Care-role employee can see and act on.
+  if(companyId){
+    const hired=domainCandidates.filter(c=>(scoreMap[c.id]||c.baseScore||0)>=85).slice(0,1);
+    hired.forEach(c=>{
+      createCrossRoleSignal({companyId,type:"onboarding",payload:{candidateName:c.name,role:c.role||"New hire",startNote:"Set up accounts, welcome email, first-week checklist."},createdByUserId:userId}).catch(()=>{});
+    });
+  }
   toast("Pipeline complete — agents analyzed your actual JD","success");
 }
 
@@ -1750,7 +1888,7 @@ function InterviewDecisionModal(){
               <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#534AB7"}}>Generate questions with AI</div><div style={{fontSize:11,color:"#7F77DD",marginTop:2}}>Claude writes 5 targeted questions based on your specific JD</div></div>
               {genLoading?<Spinner color="#534AB7"/>:<span style={{fontSize:14,color:"#534AB7"}}>→</span>}
             </div>
-            <div onClick={()=>setStep("custom-questions")} style={{padding:"16px 18px",background:"#F7F6F3",border:"1px solid #EEECEA",borderRadius:12,cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background="#F0EFE9"} onMouseLeave={e=>e.currentTarget.style.background="#F7F6F3"}>
+            <div onClick={()=>setStep("custom-questions")} style={{padding:"16px 18px",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",border:"1px solid #EEECEA",borderRadius:12,cursor:"pointer",display:"flex",alignItems:"center",gap:12,transition:"all 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background="#F0EFE9"} onMouseLeave={e=>e.currentTarget.style.background="#F7F6F3"}>
               <span style={{fontSize:20}}>✏️</span>
               <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#1C1C1A"}}>Write my own questions</div><div style={{fontSize:11,color:"#888780",marginTop:2}}>I will type the questions I want to ask each candidate</div></div>
               <span style={{fontSize:14,color:"#888780"}}>→</span>
@@ -1921,7 +2059,7 @@ function ResumeSubmitPanel(){
           <div style={{fontSize:11,fontWeight:700,color:"#888780",marginBottom:6}}>Quick test — sample resumes:</div>
           <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:state.submittedResumes.length>0?16:0}}>
             {SAMPLE_RESUMES.map(s=>(
-              <button key={s.name} onClick={()=>useSample(s)} style={{padding:"4px 10px",background:"#F7F6F3",border:"1px solid #EEECEA",borderRadius:20,fontSize:11,color:"#5F5E5A",cursor:"pointer",fontWeight:600}}>{s.name.split(" ")[0]}</button>
+              <button key={s.name} onClick={()=>useSample(s)} style={{padding:"4px 10px",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",border:"1px solid #EEECEA",borderRadius:20,fontSize:11,color:"#5F5E5A",cursor:"pointer",fontWeight:600}}>{s.name.split(" ")[0]}</button>
             ))}
           </div>
           {state.submittedResumes.length>0&&(
@@ -1972,6 +2110,7 @@ function ResumeSubmitPanel(){
 
 function HiringPipeline(){
   const{state,dispatch}=useStore();const toast=useToast();const userId=useUserId();
+  const companyId=state.employee?.companyId&&state.employee.companyId!=="demo"?state.employee.companyId:null;
   const running=state.pipelineState==="running";
   const pDone=state.pipelineState==="done";
   const doneCount=Object.values(state.agentStatuses).filter(s=>s==="done").length;
@@ -1986,7 +2125,7 @@ function HiringPipeline(){
 
   const run=async()=>{
     if(!state.jdText.trim()){toast("Paste a job description first","error");return;}
-    await runRealAgentPipeline(state.jdText,dispatch,toast,state.appliedResumes,userId);
+    await runRealAgentPipeline(state.jdText,dispatch,toast,state.appliedResumes,userId,companyId);
     dispatch({type:"OPEN_INTERVIEW_DECISION"});
   };
 
@@ -2129,7 +2268,7 @@ function HiringPipeline(){
           </div>
 
           {!running&&!pDone&&(
-            <div style={{background:"#F7F6F3",borderRadius:10,border:"1px solid #EEECEA",padding:14,marginBottom:14}}>
+            <div style={{background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderRadius:10,border:"1px solid #EEECEA",padding:14,marginBottom:14}}>
               <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A",marginBottom:8}}>Pipeline will:</div>
               {["Parse JD and extract all requirements","Score each resume against JD fit","Detect bias in job description","Draft personalized outreach emails","Generate targeted interview questions","Benchmark salaries against Indian market","Produce hiring intelligence report"].map((item,i)=>(
                 <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:5}}>
@@ -2236,15 +2375,15 @@ function SkillGapHeatmap({candidates,scores}){
           {/* Header row — skill names */}
           <thead>
             <tr>
-              <th style={{padding:"10px 14px",textAlign:"left",background:"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#1C1C1A",whiteSpace:"nowrap",minWidth:130,position:"sticky",left:0,zIndex:2}}>Candidate</th>
-              <th style={{padding:"10px 8px",textAlign:"center",background:"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#534AB7",whiteSpace:"nowrap",minWidth:48}}>Score</th>
+              <th style={{padding:"10px 14px",textAlign:"left",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#1C1C1A",whiteSpace:"nowrap",minWidth:130,position:"sticky",left:0,zIndex:2}}>Candidate</th>
+              <th style={{padding:"10px 8px",textAlign:"center",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#534AB7",whiteSpace:"nowrap",minWidth:48}}>Score</th>
               {allSkills.map(skill=>(
                 <th key={skill} onMouseEnter={()=>setHighlight(skill)} onMouseLeave={()=>setHighlight(null)}
                   style={{padding:"8px 6px",textAlign:"center",background:highlight===skill?"#EEEDFE":"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:600,color:highlight===skill?"#534AB7":"#5F5E5A",cursor:"pointer",transition:"background 0.15s",minWidth:52}}>
                   <div style={{writingMode:"vertical-rl",transform:"rotate(180deg)",fontSize:10,whiteSpace:"nowrap",padding:"4px 0"}}>{skill}</div>
                 </th>
               ))}
-              <th style={{padding:"10px 8px",textAlign:"center",background:"#F7F6F3",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#888780",whiteSpace:"nowrap",minWidth:52}}>Gaps</th>
+              <th style={{padding:"10px 8px",textAlign:"center",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderBottom:"1px solid #EEECEA",fontWeight:700,color:"#888780",whiteSpace:"nowrap",minWidth:52}}>Gaps</th>
             </tr>
           </thead>
           <tbody>
@@ -2608,7 +2747,7 @@ RULES: Never say "Applied" as company. Never repeat the resume verbatim. Be spec
               {getVerdict(sel)&&<div style={{fontSize:10,color:"#888780",marginTop:4,fontWeight:600}}>{getVerdict(sel)}</div>}
             </div>
           </div>
-          <div style={{fontSize:13,color:"#5F5E5A",lineHeight:1.7,marginBottom:14,padding:12,background:"#F7F6F3",borderRadius:10,borderLeft:"3px solid #534AB7"}}>{sel.summary||sel.text?.slice(0,150)||"Resume submitted"}</div>
+          <div style={{fontSize:13,color:"#5F5E5A",lineHeight:1.7,marginBottom:14,padding:12,background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderRadius:10,borderLeft:"3px solid #534AB7"}}>{sel.summary||sel.text?.slice(0,150)||"Resume submitted"}</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
             <div style={{background:"#E1F5EE",border:"1px solid #9FE1CB",borderRadius:10,padding:12}}>
               <div style={{fontSize:10,fontWeight:800,color:"#0F6E56",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>Matched skills</div>
@@ -2771,6 +2910,7 @@ function HiringInterviews(){
 
 function HiringReport(){
   const{state,dispatch}=useStore();const toast=useToast();
+  const activityLog=useActivityLog();
   if(state.pipelineState!=="done")return<Card style={{padding:52,textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>📄</div><div style={{fontSize:15,fontWeight:700,color:"#1C1C1A",marginBottom:6}}>No report yet</div><div style={{fontSize:13,color:"#888780",marginBottom:16}}>Run the pipeline first</div><Btn variant="primary" onClick={()=>dispatch({type:"SET_NAV",payload:"pipeline"})}>Run pipeline</Btn></Card>;
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14,maxWidth:680}}>
@@ -2782,11 +2922,19 @@ function HiringReport(){
           const scores=state.activeCandidates?.map(c=>state.dynamicScores?.[c.id]??(c.baseScore||75))||[];
           const avgScore=scores.length>0?Math.round(scores.reduce((a,b)=>a+b,0)/scores.length):83;
           const timeSaved=Math.round(totalResumes*0.35); // ~20min per resume manual
-          return<div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:20}}>
+          // Real cost, computed from actual Groq calls logged this session (promptChars/outputChars →
+          // token estimate → Groq's published per-token pricing). This is the whole session's AI usage,
+          // not just this one pipeline run in isolation — the activity log doesn't tag calls per-feature,
+          // so summing only this run's calls would require reducer plumbing that doesn't exist yet.
+          // Labeled accordingly below rather than implying false precision.
+          const doneCalls=activityLog.filter(e=>e.status==="done"&&(e.promptChars||e.outputChars));
+          const cost=estimatePipelineCost(doneCalls);
+          return<div className="hiring-report-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:20}}>
             <MetricCard label="Applicants" value={totalResumes}/>
             <MetricCard label="Shortlisted" value={shortlistedCount} delta={"Top "+Math.round(shortlistedCount/Math.max(totalResumes,1)*100)+"%"} deltaType="good"/>
             <MetricCard label="Avg score" value={avgScore+"%"} deltaType="good"/>
             <MetricCard label="Time saved" value={timeSaved+"h"} delta="vs manual screening" deltaType="good"/>
+            <MetricCard label="AI cost (session)" value={"₹"+cost.inr.toFixed(2)} delta={cost.callCount+" Groq calls"} deltaType="neutral"/>
           </div>;
         })()}
         <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:10}}>Shortlisted candidates</div>
@@ -3095,7 +3243,7 @@ function DripSequencePanel({prospects,product,onEmpty}){
                   <div style={{width:22,height:22,borderRadius:6,background:["#BA7517","#634A13","#3D2A08"][i],display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:"white"}}>{i+1}</div>
                   <span style={{fontSize:11,fontWeight:700,color:"#1C1C1A"}}>{["Day 1","Day 4","Day 10"][i]} — {email.subject||"..."}</span>
                 </div>
-                <button onClick={()=>{navigator.clipboard?.writeText("Subject: "+email.subject+"\n\n"+email.body);toast("Email "+(i+1)+" copied","success");}} style={{fontSize:10,padding:"4px 9px",background:"#F7F6F3",border:"1px solid #EEECEA",borderRadius:6,cursor:"pointer",fontWeight:600,color:"#5F5E5A"}}>Copy</button>
+                <button onClick={()=>{navigator.clipboard?.writeText("Subject: "+email.subject+"\n\n"+email.body);toast("Email "+(i+1)+" copied","success");}} style={{fontSize:10,padding:"4px 9px",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",border:"1px solid #EEECEA",borderRadius:6,cursor:"pointer",fontWeight:600,color:"#5F5E5A"}}>Copy</button>
               </div>
               <div style={{fontSize:11.5,color:"#5F5E5A",lineHeight:1.65,whiteSpace:"pre-wrap",background:"#FAFAF8",borderRadius:8,padding:"10px 12px",border:"1px solid #EEECEA",minHeight:40}}>
                 {email.body||<span style={{color:"#B4B2A9"}}>Writing...</span>}
@@ -3114,15 +3262,34 @@ function DripSequencePanel({prospects,product,onEmpty}){
   );
 }
 
+// Seeded outreach history (illustrative — authored for this project, labeled as such,
+// NOT live data). Enough repeated openings for the frequency-weighted learner to have a
+// signal, so the "learns from what's worked" loop is demonstrable. In production this
+// array is replaced by real replied/converted events loaded from Supabase.
+const SEED_OUTREACH_HISTORY=[
+  {message:"Quick question about your hiring process at",outcome:"replied"},
+  {message:"Quick question about your hiring process here",outcome:"replied"},
+  {message:"Quick question about your hiring process today",outcome:"converted"},
+  {message:"Quick question about your hiring process now",outcome:"no_reply"},
+  {message:"Hi, I wanted to reach out about",outcome:"no_reply"},
+  {message:"Hi, I wanted to reach out regarding",outcome:"no_reply"},
+  {message:"Hi, I wanted to reach out quickly",outcome:"no_reply"},
+];
+
 function SalesMode(){
   const{state,dispatch}=useStore();
   const toast=useToast();const userId=useUserId();
+  // Outcome-learning loop: nudges new outreach toward openings that have actually converted.
+  const learner=useMemo(()=>createOutcomeLearner(SEED_OUTREACH_HISTORY),[]);
+  const learningHint=useMemo(()=>learner.buildLearningHint(),[learner]);
+  const companyId=state.employee?.companyId&&state.employee.companyId!=="demo"?state.employee.companyId:null;
   const[activeTab,setActiveTab]=useState("setup");
   const[objInput,setObjInput]=useState("");
   const[objReply,setObjReply]=useState("");
   const[objLoading,setObjLoading]=useState(false);
   const[genThought,setGenThought]=useState("");
   const[genPhase,setGenPhase]=useState(""); // "thinking" | "scoring" | "writing" | ""
+  const salesBrain=useMemo(()=>buildBrainFromState(state),[state.salesProspects,state.activeCandidates,state.candidateDecisions,state.crossEvents]);
 
   const generate=async()=>{
     if(!state.salesProduct.trim()){toast("Add your product description first","error");return;}
@@ -3146,9 +3313,12 @@ function SalesMode(){
       const prospects=JSON.parse(clean);
       dispatch({type:"SET_SALES_PROSPECTS",payload:prospects});
       setGenPhase("writing");
+      // ── CLOSE THE LOOP: consult the Company Brain per account before writing ──
+      const brain=buildBrainFromState(state);
       // Stream each email as it's written
       for(const pr of prospects){
-        const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm. Sign as Sales Team, NexFlow.";
+        const bctx=salesAccountIntel(brain,pr);
+        const ep="Write a 3-paragraph cold email to "+pr.name+" ("+pr.role+" at "+pr.company+", pain: "+pr.painPoint+") about: "+state.salesProduct.slice(0,300)+". Specific and warm. Sign as Sales Team, NexFlow."+bctx.prompt+(learningHint?"\n\n"+learningHint:"");
         let emailText="";
         await callClaudeStream([{role:"user",content:ep}],"",(accumulated)=>{
           emailText=accumulated;
@@ -3160,10 +3330,10 @@ function SalesMode(){
       setGenPhase("");
       setActiveTab("prospects");
       // Save to Supabase
-      saveSalesSession({product:state.salesProduct,industry:state.salesTarget,prospects,emailDrafts:{},...(userId&&{user_id:userId})});
+      saveSalesSession({product:state.salesProduct,industry:state.salesTarget,prospects,emailDrafts:{},...(userId&&{user_id:userId}),...(companyId&&{company_id:companyId})});
     }catch{
       const fallback=[
-        {id:1,name:"Ankit Sharma",role:"VP Engineering",company:"GrowthTech",industry:"SaaS",painPoint:"Manual hiring taking 3+ weeks",fitScore:92,budget:"Rs 5-10L/yr",objection:"Already using spreadsheets",email:"ankit@growthtech.io"},
+        {id:1,name:"Ananya Iyer",role:"VP Engineering",company:"UrbanCart",industry:"E-commerce",painPoint:"Manual hiring taking 3+ weeks",fitScore:92,budget:"Rs 5-10L/yr",objection:"Already using spreadsheets",email:"ananya@urbancart.in"},
         {id:2,name:"Meera Joshi",role:"Head of HR",company:"ScaleUp",industry:"Fintech",painPoint:"No structured screening",fitScore:87,budget:"Rs 3-7L/yr",objection:"Team is small",email:"meera@scaleup.in"},
         {id:3,name:"Rohan Das",role:"CEO",company:"FastHire",industry:"Recruitment",painPoint:"Slow candidate evaluation",fitScore:84,budget:"Rs 8-15L/yr",objection:"Price too high",email:"rohan@fasthire.co"},
         {id:4,name:"Priti Singh",role:"Talent Manager",company:"BuildCo",industry:"Construction",painPoint:"No bias detection",fitScore:76,budget:"Rs 2-5L/yr",objection:"Need ROI first",email:"priti@buildco.in"},
@@ -3201,6 +3371,7 @@ function SalesMode(){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
+      <IncomingSignalsBanner companyId={companyId} type="lead" icon="🎯" label="lead" fromLabel="Care"/>
       {/* Step stepper */}
       <div style={{display:"flex",alignItems:"flex-start",marginBottom:20,background:"white",borderRadius:14,padding:"14px 18px",border:"1px solid #EEECEA",boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}}>
         {STEPS.map((s,i)=>[
@@ -3284,8 +3455,14 @@ function SalesMode(){
 
       {activeTab==="outreach"&&(
         <div style={{display:"flex",flexDirection:"column",gap:12,maxWidth:760}}>
+          {learningHint&&state.salesProspects.length>0&&(
+            <div style={{background:"rgba(83,74,183,0.06)",border:"1px solid #CECBF6",borderRadius:10,padding:"9px 13px",display:"flex",alignItems:"center",gap:9}}>
+              <span style={{fontSize:15}}>🧠</span>
+              <div style={{fontSize:11.5,color:"#3C3489",lineHeight:1.5}}><b>Outcome-learning loop active</b> — these emails were nudged toward openings that converted across {learner.sampleSize} past outreach outcomes. Improves as real replies are recorded.</div>
+            </div>
+          )}
           {state.salesProspects.length===0?<Card style={{padding:48,textAlign:"center"}}><div style={{fontSize:40,marginBottom:12}}>✉️</div><Btn variant="orange" onClick={()=>setActiveTab("setup")}>Set up product first</Btn></Card>:
-          state.salesProspects.map(p=>{const sent=state.salesSentEmails[p.id];const draft=state.salesEmailDrafts[p.id]||"";return(
+          state.salesProspects.map(p=>{const sent=state.salesSentEmails[p.id];const draft=state.salesEmailDrafts[p.id]||"";const intel=salesAccountIntel(salesBrain,p);return(
             <Card key={p.id} style={{padding:18}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
                 <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700,color:"#1C1C1A"}}>{p.name} — {p.company}</div><div style={{fontSize:11,color:"#888780"}}>{p.email} · Fit: {p.fitScore}/100</div></div>
@@ -3310,6 +3487,17 @@ function SalesMode(){
                   {sent?<Tag color="success">Sent</Tag>:<Btn variant="orange" size="sm" onClick={()=>{dispatch({type:"SET_SALES_SENT",id:p.id});toast("Sent to "+p.name,"success");}}>Send</Btn>}
                 </div>
               </div>
+              {/* ── COMPANY BRAIN account intelligence — visible loop ── */}
+              {intel.status==="known"?(
+                <div style={{background:"rgba(28,122,147,0.06)",border:"1px solid rgba(28,122,147,0.3)",borderRadius:8,padding:"8px 11px",marginBottom:10}}>
+                  <div style={{fontSize:10,fontWeight:800,color:"#0F4A5A",letterSpacing:"0.05em",marginBottom:5}}>🧩 WRITTEN KNOWING — Company Brain account check</div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {intel.notes.map((n,i)=><span key={i} style={{fontSize:10.5,fontWeight:600,color:n.warn?"#993556":"#0F6E56",background:n.warn?"#FBEAF0":"#E1F5EE",border:"1px solid "+(n.warn?"#ED93B1":"#9FE1CB"),borderRadius:20,padding:"3px 10px"}}>{n.warn?"⚠️ ":"✓ "}{n.t}</span>)}
+                  </div>
+                </div>
+              ):(
+                <div style={{fontSize:10.5,fontWeight:600,color:"#8A7B63",marginBottom:10,display:"flex",alignItems:"center",gap:6}}><span style={{width:6,height:6,borderRadius:"50%",background:"#B4B2A9"}}/>🆕 Net-new account — no prior contact across any team</div>
+              )}
               <div style={{background:"#FFF8EE",border:"1px solid #FAC775",borderRadius:8,padding:12,fontSize:12,color:"#5F5E5A",lineHeight:1.65,maxHeight:80,overflow:"hidden",WebkitMaskImage:"linear-gradient(to bottom,black 40%,transparent 100%)",whiteSpace:"pre-wrap"}}>{draft||<span style={{color:"#B4B2A9"}}>Writing email...</span>}</div>
             </Card>
           );})}
@@ -3360,6 +3548,7 @@ function SalesMode(){
 function SupportMode(){
   const{state,dispatch}=useStore();
   const toast=useToast();const userId=useUserId();
+  const companyId=state.employee?.companyId&&state.employee.companyId!=="demo"?state.employee.companyId:null;
   const[chatInput,setChatInput]=useState("");
   const[chatLoading,setChatLoading]=useState(false);
   const[activeChatId,setActiveChatId]=useState(null);
@@ -3432,7 +3621,7 @@ function SupportMode(){
     dispatch({type:"UPDATE_SUPPORT_CHAT",id,updates:{messages:finalMsgs,sentiment,status:sentiment==="negative"?"escalated":"open",csat}});
     // Async save to Supabase (don't block UI)
     const updatedChats=[...state.supportChats.filter(c=>c.id!==id),{...state.supportChats.find(c=>c.id===id)||{id,timestamp:new Date().toLocaleTimeString()},messages:finalMsgs,sentiment,csat}];
-    saveSupportSession({docs:state.supportDocs,kb:state.supportKB,chats:updatedChats,...(userId&&{user_id:userId})});
+    saveSupportSession({docs:state.supportDocs,kb:state.supportKB,chats:updatedChats,...(userId&&{user_id:userId}),...(companyId&&{company_id:companyId})});
     setChatLoading(false);
   };
 
@@ -3442,6 +3631,7 @@ function SupportMode(){
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <IncomingSignalsBanner companyId={companyId} type="onboarding" icon="🧑‍💼" label="onboarding task" fromLabel="Hiring"/>
       {/* 3-step guide */}
       <div style={{display:"flex",alignItems:"center",gap:0,background:"white",border:"1px solid #EEECEA",borderRadius:14,padding:"12px 20px",boxShadow:"0 1px 6px rgba(0,0,0,0.04)"}}>
         {SUPPORT_STEPS.map((s,i)=>[
@@ -3538,8 +3728,9 @@ function SLATimer({priority,startTime}){
 }
 
 function CareMode(){
-  const{dispatch:globalDispatch}=useStore();
+  const{state:globalState,dispatch:globalDispatch}=useStore();
   const toast=useToast();const userId=useUserId();
+  const companyId=globalState.employee?.companyId&&globalState.employee.companyId!=="demo"?globalState.employee.companyId:null;
   const[tickets,setTickets]=useState(SAMPLE_TICKETS.map(t=>({...t,createdAt:Date.now()-Math.random()*2*60*60*1000})));
   const[selected,setSelected]=useState(null);
   const[generating,setGenerating]=useState(null);
@@ -3547,6 +3738,7 @@ function CareMode(){
   const[approved,setApproved]=useState({});
   const[tone,setTone]=useState("empathetic");
   const[upsells,setUpsells]=useState({});
+  const[brainNotes,setBrainNotes]=useState({});
   const UPSELL_KEYWORDS=["upgrade","enterprise","200 users","100 users","more seats","pricing","plan","premium","annual","bulk"];
 
   const TONES={
@@ -3565,7 +3757,11 @@ function CareMode(){
       direct:"Lead with the solution immediately. No preamble. Bullet points if needed. Under 100 words.",
       urgent:"This is urgent. Acknowledge immediately, give specific timeline, escalate if needed. Highest priority language.",
     }[tone];
-    const p="You are a customer care agent. Write a response in "+tone.toUpperCase()+" tone.\n\nTone instruction: "+toneInstructions+"\n\nCustomer: "+t.customer+" ("+t.company+", "+t.city+")\nSubject: "+t.subject+"\nMessage: "+t.message+"\nCategory: "+t.category+"\nSentiment score: "+t.sentiment+" ("+(t.sentiment<=-0.5?"Very negative":t.sentiment<0?"Frustrated":"Positive")+")\n\nRules:\n- Address their specific issue (not generic)\n- Give concrete next step\n- Sign as Customer Care Team, NexFlow";
+    // ── CLOSE THE LOOP: consult the Company Brain before drafting ────────────
+    const brain=buildBrainFromState(globalState);
+    const ctx=brainContextFor(brain,{name:t.customer,email:t.email},"care");
+    setBrainNotes(n=>({...n,[t.id]:ctx.notes}));
+    const p="You are a customer care agent. Write a response in "+tone.toUpperCase()+" tone.\n\nTone instruction: "+toneInstructions+"\n\nCustomer: "+t.customer+" ("+t.company+", "+t.city+")\nSubject: "+t.subject+"\nMessage: "+t.message+"\nCategory: "+t.category+"\nSentiment score: "+t.sentiment+" ("+(t.sentiment<=-0.5?"Very negative":t.sentiment<0?"Frustrated":"Positive")+")"+ctx.prompt+"\n\nRules:\n- Address their specific issue (not generic)\n- Give concrete next step\n- Sign as Customer Care Team, NexFlow";
     let full="";
     await callClaudeStream([{role:"user",content:p}],"",(accumulated)=>{
       full=accumulated;
@@ -3684,7 +3880,7 @@ function CareMode(){
                 </div>
               </div>
             </div>
-            <div style={{background:"#F7F6F3",borderRadius:10,padding:14,fontSize:13,color:"#1C1C1A",lineHeight:1.7,marginBottom:16,borderLeft:"3px solid #D4537E"}}>{selected.message}</div>
+            <div style={{background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderRadius:10,padding:14,fontSize:13,color:"#1C1C1A",lineHeight:1.7,marginBottom:16,borderLeft:"3px solid #D4537E"}}>{selected.message}</div>
             {/* Tone selector */}
             {!responses[selected.id]&&(
               <div style={{marginBottom:12}}>
@@ -3707,6 +3903,14 @@ function CareMode(){
             ):(
               <div style={{display:"flex",flexDirection:"column",gap:10}}>
                 <div style={{fontSize:12,fontWeight:800,color:"#1C1C1A",display:"flex",alignItems:"center",gap:6}}>AI draft <Tag color="warn">Review before sending</Tag></div>
+                {brainNotes[selected.id]?.length>0&&(
+                  <div style={{background:"rgba(28,122,147,0.07)",border:"1px solid rgba(28,122,147,0.28)",borderRadius:10,padding:"9px 12px"}}>
+                    <div style={{fontSize:10,fontWeight:800,color:"#0F4A5A",letterSpacing:"0.06em",marginBottom:5,display:"flex",alignItems:"center",gap:5}}>🧩 WRITTEN KNOWING — from the Company Brain</div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                      {brainNotes[selected.id].map((n,i)=><span key={i} style={{fontSize:10.5,fontWeight:600,color:"#0F4A5A",background:"#E1F5EE",border:"1px solid #9FE1CB",borderRadius:20,padding:"3px 10px"}}>{n}</span>)}
+                    </div>
+                  </div>
+                )}
                 <textarea value={responses[selected.id]} onChange={e=>setResponses(r=>({...r,[selected.id]:e.target.value}))} style={{width:"100%",height:180,border:"1px solid #EEECEA",borderRadius:10,padding:12,fontSize:13,lineHeight:1.65,background:"#FAFAF8",fontFamily:"inherit",resize:"none",boxSizing:"border-box",outline:"none"}} onFocus={e=>e.target.style.borderColor="#D4537E"} onBlur={e=>e.target.style.borderColor="#EEECEA"}/>
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   <Btn variant="secondary" onClick={()=>genResponse(selected)} disabled={generating===selected.id}>Regenerate</Btn>
@@ -3722,7 +3926,7 @@ function CareMode(){
                   </button>}
                   <Btn variant="pink" fullWidth disabled={approved[selected.id]} onClick={()=>{
                     setApproved(a=>({...a,[selected.id]:true}));
-                    saveCareTicket({ticket:selected,toneUsed:tone,aiResponse:responses[selected.id],approved:true,...(userId&&{user_id:userId})});
+                    saveCareTicket({ticket:selected,toneUsed:tone,aiResponse:responses[selected.id],approved:true,...(userId&&{user_id:userId}),...(companyId&&{company_id:companyId})});
                     // ── UPSELL DETECTION: CareFlow → SalesFlow ─────────────
                     const msgLow=(selected.message||"").toLowerCase();
                     const hasUpsell=UPSELL_KEYWORDS.some(kw=>msgLow.includes(kw));
@@ -3731,6 +3935,11 @@ function CareMode(){
                       const newLead={id:Date.now(),name:selected.customer,role:"Customer",company:selected.company||"Customer Co",industry:"Existing customer",painPoint:selected.subject,fitScore:82,budget:"Upgrade enquiry",objection:"Already a customer — warm lead",email:selected.email||selected.customer.toLowerCase().replace(/\s/g,".")+"@email.com"};
                       globalDispatch({type:"SET_SALES_PROSPECTS",payload:[newLead,...([])]});
                       globalDispatch({type:"ADD_CROSS_EVENT",event:{type:"care_to_sales",title:`CareFlow → SalesFlow upsell`,desc:`${selected.customer} mentioned upgrade in support ticket — routed as warm sales lead`,action:"SalesFlow pre-loaded with this lead"}});
+                      // Real, persisted, RLS-scoped signal — visible to a sales_rep employee at this
+                      // company even in a different browser session, not just this in-memory event.
+                      if(companyId){
+                        createCrossRoleSignal({companyId,type:"lead",payload:newLead,createdByUserId:userId}).catch(()=>{});
+                      }
                     }
                     toast(hasUpsell?"Response sent — upsell detected, lead routed to SalesFlow!":"Response sent to "+selected.customer,hasUpsell?"success":"success");
                   }}>
@@ -3919,7 +4128,7 @@ function SMBMode(){
               <Card style={{padding:18}}>
                 <div style={{fontSize:13,fontWeight:800,color:"#1C1C1A",marginBottom:12}}>CRM — Customer contacts</div>
                 {result.crmContacts.map((c,i)=>(
-                  <div key={i} style={{padding:"10px 12px",background:"#F7F6F3",borderRadius:9,border:"1px solid #EEECEA",marginBottom:8}}>
+                  <div key={i} style={{padding:"10px 12px",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",borderRadius:9,border:"1px solid #EEECEA",marginBottom:8}}>
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
                       <div style={{fontSize:12,fontWeight:700,color:"#1C1C1A"}}>{c.name}</div>
                       <Tag color={c.value==="high"?"success":c.value==="medium"?"warn":"neutral"}>{c.value}</Tag>
@@ -4486,7 +4695,7 @@ function WarRoomMode(){
       {/* Launch bar */}
       <div style={{background:"white",border:"1.5px solid #F1F1F1",borderRadius:14,padding:"16px 20px",marginBottom:16,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
         <div style={{flex:1}}>
-          <div style={{fontSize:14,fontWeight:800,color:"#111827"}}>Run all 6 AI systems with real handoffs</div>
+          <div style={{fontSize:14,fontWeight:800,color:"#111827"}}>Run every AI agent with real handoffs</div>
           <div style={{fontSize:12,color:"#9CA3AF",marginTop:2}}>HireFlow → SalesFlow → SupportFlow → CareFlow — agents read each other's output, debate, and resolve disagreements</div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}>
@@ -4825,11 +5034,13 @@ body{font-family:Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%;}
 /* ── TABLET ── */
 @media(max-width:1100px){
   .home-grid{grid-template-columns:repeat(2,1fr)!important;}
+  .feature-grid{grid-template-columns:repeat(2,1fr)!important;}
   .care-grid{grid-template-columns:1fr!important;}
   .support-grid{grid-template-columns:1fr!important;}
   .hiring-layout{flex-direction:column!important;}
   .warroom-grid{grid-template-columns:1fr!important;}
   .command-report-grid{grid-template-columns:repeat(2,1fr)!important;}
+  .hiring-report-grid{grid-template-columns:repeat(3,1fr)!important;}
 }
 
 /* ── MOBILE ── */
@@ -4845,6 +5056,9 @@ body{font-family:Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%;}
 
   /* Home grid */
   .home-grid{grid-template-columns:1fr!important;}
+  .feature-grid{grid-template-columns:1fr!important;}
+  .feature-showcase-section{padding:44px 16px 40px!important;}
+  .hiring-report-grid{grid-template-columns:repeat(2,1fr)!important;}
   .proof-pills{flex-direction:column!important;align-items:stretch!important;gap:8px!important;}
   .guided-path-steps{flex-wrap:wrap!important;gap:6px!important;justify-content:center!important;}
   .guided-path-strip{padding:12px 14px!important;margin:0 0 12px!important;}
@@ -4902,7 +5116,7 @@ function HiringShell(){
   const done=state.pipelineState==="done";
   const Page=HIRING_PAGES[state.activeNav]||HiringDashboard;
   return(
-    <div className="hiring-shell" style={{display:"flex",height:"100vh",background:"#F7F6F3",overflow:"hidden"}}>
+    <div className="hiring-shell" style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",overflow:"hidden"}}>
       <aside className="hiring-aside" style={{width:state.sidebarOpen?216:52,background:"white",borderRight:"1px solid #EEECEA",display:"flex",flexDirection:"column",transition:"width 0.25s",overflow:"hidden",flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:8,padding:"14px 10px",borderBottom:"1px solid #EEECEA"}}>
           <div style={{width:28,height:28,background:"linear-gradient(135deg,#534AB7,#7F77DD)",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,flexShrink:0}}>🧠</div>
@@ -4931,7 +5145,7 @@ function HiringShell(){
             <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})} style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#534AB7";e.currentTarget.style.color="#534AB7";}} onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>All modes</button>
           </div>
         </header>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><div style={{animation:"fadeIn 0.3s ease"}}><Page/></div></main>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><div style={{animation:"fadeIn 0.3s ease"}}>{(!state.activeNav||state.activeNav==="dashboard")&&<ModeBanner mode="hiring"/>}<Page/></div></main>
       </div>
       <ToastLayer/>
       <HiringChat/>
@@ -4967,47 +5181,260 @@ function UserChip(){
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// COMPANY BRAIN — the shared cross-agent memory, made visible.
+// Builds a live graph from whatever the other agents have done this session
+// (care tickets, sales prospects, hiring candidates, cross-agent handoffs),
+// resolves duplicate identities, and surfaces the cross-team next-best-actions
+// no single agent could see. Zero setup — it reflects real session activity.
+// ══════════════════════════════════════════════════════════════════════════
+const BRAIN_PRIORITY={high:{bg:"#FBEAF0",bd:"#ED93B1",fg:"#993556",label:"HIGH"},medium:{bg:"#FAEEDA",bd:"#EF9F27",fg:"#854F0B",label:"MEDIUM"},low:{bg:"#E1F5EE",bd:"#5DCAA5",fg:"#0F6E56",label:"LOW"}};
+const BRAIN_SOURCE_META={sales:{icon:"🎯",label:"Sales",color:"#BA7517"},support:{icon:"💬",label:"Support",color:"#1D9E75"},care:{icon:"❤️",label:"Care",color:"#D4537E"},hiring:{icon:"🧠",label:"Hiring",color:"#534AB7"},smb:{icon:"🏪",label:"SMB",color:"#7C3AED"}};
+
+// Single source of truth for the shared memory graph. Both the Company Brain
+// screen AND the individual agents (Care, Sales) build the brain from here, so
+// they're all reading the same memory — that's what closes the loop.
+function buildBrainFromState(state,seedEvents=[]){
+  // seedEvents = rows loaded from Supabase (brain_events), replayed so memory
+  // persists across sessions and is shared by every employee of the company.
+  const b=createCompanyBrain(seedEvents);
+  (SAMPLE_TICKETS||[]).forEach(t=>{
+    const complaint=(t.sentiment??0)<-0.2;
+    const kind=t.category==="feedback"||(t.sentiment??0)>0.3?"customer":"ticket_author";
+    b.recordEvent({agent:"care",kind,title:t.subject,desc:t.message?.slice(0,90),
+      person:{name:t.customer,email:t.email,attrs:{company:t.company,city:t.city,complaint,upsell:t.category==="sales",category:t.category}}});
+  });
+  (state.salesProspects||[]).forEach(p=>{
+    b.recordEvent({agent:"sales",kind:"lead",title:`Prospect: ${p.company||p.name}`,desc:p.painPoint,
+      person:{name:p.name,email:p.email,attrs:{company:p.company,budget:p.budget,painPoint:p.painPoint,upsell:true}}});
+  });
+  (state.activeCandidates||[]).forEach(c=>{
+    const decision=state.candidateDecisions?.[c.id];
+    b.recordEvent({agent:"hiring",kind:"candidate",title:`Candidate: ${c.name}`,desc:c.role||c.summary,
+      person:{name:c.name,email:c.email,attrs:{company:c.company,role:c.role,hired:decision==="accepted"||decision==="shortlist"}}});
+  });
+  (state.crossEvents||[]).forEach(e=>{
+    b.recordEvent({agent:"system",kind:"handoff",title:e.title,desc:e.desc});
+  });
+  return b;
+}
+
+// brainContextFor + salesAccountIntel are the read-side of the closed loop.
+// Extracted to lib/brainContext.js so they're pure and unit-tested (see brainContext.test.js).
+
+function BrainMode(){
+  const{state,dispatch,session}=useStore();
+  const toast=useToast();
+  const[selected,setSelected]=useState(null);
+  const[persisted,setPersisted]=useState([]);
+  const[syncing,setSyncing]=useState(false);
+  const companyId=state.employee?.companyId&&state.employee.companyId!=="demo"?state.employee.companyId:null;
+  const userId=session?.user?.id||null;
+
+  // ── READ: replay the company's persisted memory so the Brain survives reloads ──
+  useEffect(()=>{
+    if(!companyId){setPersisted([]);return;}
+    let cancelled=false;
+    loadBrainEvents(companyId).then(rows=>{if(!cancelled)setPersisted(rows||[]);});
+    return()=>{cancelled=true;};
+  },[companyId]);
+
+  const brain=useMemo(()=>buildBrainFromState(state,persisted),[state.salesProspects,state.activeCandidates,state.candidateDecisions,state.crossEvents,persisted]);
+
+  // ── WRITE: persist this session's known people into shared company memory ──
+  const syncToMemory=async()=>{
+    if(!companyId){toast("Connect a company account to persist shared memory (demo mode is session-only)","info");return;}
+    setSyncing(true);
+    const ents=brain.entities;
+    let saved=0;
+    for(const e of ents){
+      const ok=await saveBrainEvent({companyId,createdByUserId:userId,agent:[...e.sources][0]||"system",kind:[...e.kinds][0]||"event",
+        title:e.name,desc:e.attrs?.company||"",person:{name:e.name,email:e.email,phone:e.phone},attrs:e.attrs});
+      if(ok)saved++;
+    }
+    setSyncing(false);
+    toast(`Saved ${saved} records to shared company memory`,"success");
+    loadBrainEvents(companyId).then(rows=>setPersisted(rows||[]));
+  };
+
+  const stats=brain.stats();
+  const insights=brain.getInsights();
+  const entities=brain.entities.slice().sort((a,b)=>b.sources.size-a.sources.size||b.touches-a.touches);
+  const view=selected?brain.getUnifiedView({name:selected}):null;
+
+  const actOn=(ins)=>{
+    const target=ins.agents?.[0];
+    if(target&&BRAIN_SOURCE_META[target]){toast(`Routing "${ins.entity}" to ${BRAIN_SOURCE_META[target].label}…`,"success");dispatch({type:"SET_MODE",payload:target});}
+    else toast("Action noted","info");
+  };
+
+  return(
+    <div style={{maxWidth:1080,margin:"0 auto"}}>
+      {/* Explainer */}
+      <div style={{background:"rgba(255,253,248,0.8)",border:"1px solid rgba(28,122,147,0.25)",borderRadius:14,padding:"16px 20px",marginBottom:18,display:"flex",gap:14,alignItems:"flex-start"}}>
+        <div style={{fontSize:26,lineHeight:1}}>🧩</div>
+        <div style={{flex:1}}>
+          <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:19,fontWeight:700,color:"#0F4A5A",marginBottom:4}}>Six agents. One memory.</div>
+          <div style={{fontSize:12.5,color:"#5A6B6E",lineHeight:1.65}}>The same person shows up in sales, support and hiring as three disconnected records. The Brain merges them by email, phone, then name — then tells you the cross-team move to make next. SalesFlow and CareFlow read this memory <b>before</b> they draft.</div>
+        </div>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8,flexShrink:0}}>
+          <span style={{fontSize:9.5,fontWeight:800,padding:"4px 10px",borderRadius:20,background:companyId?"#E1F5EE":"#F1EFE8",color:companyId?"#0F6E56":"#8A7B63",border:"1px solid "+(companyId?"#9FE1CB":"#D3D1C7")}}>{companyId?`● PERSISTED · ${persisted.length} saved`:"○ SESSION-ONLY (demo)"}</span>
+          <button onClick={syncToMemory} disabled={syncing} style={{fontSize:11,fontWeight:700,color:"#F5EEDF",background:syncing?"#8A7B63":"#0D3B4F",border:"none",borderRadius:8,padding:"7px 14px",cursor:syncing?"default":"pointer",display:"flex",alignItems:"center",gap:6}}>{syncing?<><Spinner color="#F5EEDF"/>Saving…</>:"💾 Save to shared memory"}</button>
+        </div>
+      </div>
+
+      {/* Stat strip */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+        {[
+          {n:stats.entities,l:"People & businesses known",c:"#0D3B4F"},
+          {n:stats.mergedIdentities,l:"Duplicate identities merged",c:"#1C7A93",hi:true},
+          {n:stats.events,l:"Memories on the timeline",c:"#8A5A12"},
+          {n:insights.length,l:"Next-best-actions found",c:"#993556"},
+        ].map((s,i)=>(
+          <div key={i} style={{background:"#FFFDF8",border:"1px solid rgba(120,95,55,0.14)",borderRadius:14,padding:"16px 18px",boxShadow:s.hi?"0 6px 20px rgba(28,122,147,0.14)":"0 2px 8px rgba(120,95,55,0.05)",position:"relative",overflow:"hidden"}}>
+            {s.hi&&<div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#0D3B4F,#1C7A93,#B8894A)"}}/>}
+            <div style={{fontSize:30,fontWeight:900,color:s.c,fontFamily:"'Playfair Display',Georgia,serif",lineHeight:1}}>{s.n}</div>
+            <div style={{fontSize:11,color:"#8A7B63",marginTop:6,fontWeight:600}}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1.15fr 1fr",gap:16}}>
+        {/* ── NEXT-BEST-ACTIONS ─────────────────────────────────────── */}
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:"#0F4A5A",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>⚡ What to do next</div>
+          {insights.length===0?(
+            <div style={{background:"#FFFDF8",border:"1px dashed rgba(120,95,55,0.25)",borderRadius:14,padding:"28px 20px",textAlign:"center",color:"#8A7B63",fontSize:12.5}}>
+              No cross-team actions yet. Run <b>SalesFlow</b> or <b>CareFlow</b>, then return — the Brain will connect the dots automatically.
+            </div>
+          ):insights.map(ins=>{const p=BRAIN_PRIORITY[ins.priority];return(
+            <motion.div key={ins.id} initial={{opacity:0,y:8}} animate={{opacity:1,y:0}}
+              style={{background:"#FFFDF8",border:`1px solid ${p.bd}`,borderLeft:`4px solid ${p.bd}`,borderRadius:12,padding:"14px 16px",marginBottom:10,boxShadow:"0 2px 10px rgba(120,95,55,0.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <span style={{fontSize:9,fontWeight:800,padding:"3px 8px",borderRadius:20,background:p.bg,color:p.fg,letterSpacing:"0.05em"}}>{p.label}</span>
+                <span style={{fontSize:13,fontWeight:800,color:"#211E19"}}>{ins.entity}</span>
+              </div>
+              <div style={{fontSize:13,fontWeight:700,color:"#0F4A5A",marginBottom:5}}>{ins.action}</div>
+              <div style={{fontSize:11.5,color:"#6B6355",lineHeight:1.6,marginBottom:10}}>{ins.reason}</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button onClick={()=>actOn(ins)} style={{fontSize:11,fontWeight:700,color:"#F5EEDF",background:"#211E19",border:"none",borderRadius:8,padding:"6px 14px",cursor:"pointer"}}>Act on it →</button>
+                <div style={{display:"flex",gap:4}}>{ins.agents?.map(a=>BRAIN_SOURCE_META[a]&&<span key={a} title={BRAIN_SOURCE_META[a].label} style={{fontSize:13}}>{BRAIN_SOURCE_META[a].icon}</span>)}</div>
+              </div>
+            </motion.div>
+          );})}
+        </div>
+
+        {/* ── ENTITY DIRECTORY + 360 ────────────────────────────────── */}
+        <div>
+          <div style={{fontSize:12,fontWeight:800,color:"#0F4A5A",letterSpacing:"0.08em",textTransform:"uppercase",marginBottom:10}}>👥 Who the company knows</div>
+          <div style={{background:"#FFFDF8",border:"1px solid rgba(120,95,55,0.14)",borderRadius:14,overflow:"hidden"}}>
+            {entities.length===0&&<div style={{padding:24,textAlign:"center",color:"#8A7B63",fontSize:12}}>No one yet.</div>}
+            {entities.map((e,i)=>{const open=selected===e.name;return(
+              <div key={e.key} style={{borderBottom:i<entities.length-1?"1px solid rgba(120,95,55,0.1)":"none"}}>
+                <button onClick={()=>setSelected(open?null:e.name)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:open?"rgba(28,122,147,0.06)":"transparent",border:"none",cursor:"pointer",textAlign:"left"}}>
+                  <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",color:"#F5F8F8",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,flexShrink:0}}>{(e.name||"?").slice(0,2).toUpperCase()}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:"#211E19",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.name}</div>
+                    <div style={{fontSize:10,color:"#8A7B63",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.email||e.attrs.company||"—"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:3}}>{[...e.sources].map(s=>BRAIN_SOURCE_META[s]&&<span key={s} title={BRAIN_SOURCE_META[s].label} style={{fontSize:12}}>{BRAIN_SOURCE_META[s].icon}</span>)}</div>
+                  {e.sources.size>1&&<span style={{fontSize:8,fontWeight:800,color:"#0F6E56",background:"#E1F5EE",borderRadius:20,padding:"2px 6px"}}>MERGED</span>}
+                </button>
+                {open&&view&&(
+                  <div style={{padding:"4px 14px 14px 56px",animation:"fadeIn 0.25s ease"}}>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
+                      {view.kinds.map(k=><span key={k} style={{fontSize:9,fontWeight:700,color:"#5F5E5A",background:"#F1EFE8",borderRadius:6,padding:"3px 8px"}}>{k}</span>)}
+                      {view.attrs.complaint&&<span style={{fontSize:9,fontWeight:700,color:"#993556",background:"#FBEAF0",borderRadius:6,padding:"3px 8px"}}>open complaint</span>}
+                      {view.attrs.upsell&&<span style={{fontSize:9,fontWeight:700,color:"#854F0B",background:"#FAEEDA",borderRadius:6,padding:"3px 8px"}}>upsell signal</span>}
+                    </div>
+                    <div style={{fontSize:10,color:"#8A7B63",fontWeight:700,marginBottom:4}}>TIMELINE</div>
+                    {view.events.map((ev,j)=>(
+                      <div key={j} style={{display:"flex",gap:8,marginBottom:5}}>
+                        <span style={{fontSize:11}}>{BRAIN_SOURCE_META[ev.agent]?.icon||"•"}</span>
+                        <div style={{fontSize:11,color:"#3A342A",lineHeight:1.4}}><b>{ev.title}</b>{ev.desc?<span style={{color:"#8A7B63"}}> — {ev.desc}</span>:null}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );})}
+          </div>
+          {stats.mergedIdentities>0&&<div style={{fontSize:10.5,color:"#0F6E56",marginTop:8,fontWeight:600}}>✓ {stats.mergedIdentities} {stats.mergedIdentities===1?"person was":"people were"} recognized across multiple teams and merged into one record.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModeHeader({icon,title,subtitle,color,tag,tagColor}){
   const{state,dispatch}=useStore();
   return(
-    <header style={{background:"white",borderBottom:"1px solid #F3F4F6",padding:"12px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 1px 6px rgba(0,0,0,0.06)"}}>
+    <header style={{background:"rgba(251,246,236,0.92)",backdropFilter:"blur(10px)",borderBottom:"1px solid rgba(120,95,55,0.14)",padding:"12px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,boxShadow:"0 2px 12px rgba(120,95,55,0.06)"}}>
       <div style={{display:"flex",alignItems:"center",gap:10}}>
         {/* NexFlow brand */}
         <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
-          style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",padding:"4px 8px 4px 0",borderRight:"1px solid #F3F4F6",marginRight:8}}
+          style={{display:"flex",alignItems:"center",gap:7,background:"none",border:"none",cursor:"pointer",padding:"4px 8px 4px 0",borderRight:"1px solid rgba(120,95,55,0.14)",marginRight:8}}
           onMouseEnter={e=>e.currentTarget.style.opacity="0.7"}
           onMouseLeave={e=>e.currentTarget.style.opacity="1"}>
-          <div style={{width:26,height:26,borderRadius:7,background:"linear-gradient(135deg,#6D5FFA,#8B5CF6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,boxShadow:"0 0 10px rgba(109,95,250,0.4)"}}>⚡</div>
-          <span style={{fontSize:11,fontWeight:800,color:"#6B7280"}}>NexFlow</span>
+          <div style={{width:27,height:27,borderRadius:8,background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,boxShadow:"0 4px 12px rgba(13,59,79,0.25)"}}>⚡</div>
+          <span style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:13,fontWeight:800,color:"#3A342A"}}>NexFlow</span>
         </button>
         {/* Mode identity */}
         <div style={{width:34,height:34,borderRadius:9,background:color+"18",border:"1.5px solid "+color+"33",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}}>{icon}</div>
         <div>
-          <div style={{fontSize:14,fontWeight:800,color:"#111827",letterSpacing:"-0.01em"}}>{title}</div>
-          <div style={{fontSize:10,color:"#9CA3AF",fontWeight:500}}>{subtitle}</div>
+          <div style={{fontSize:14,fontWeight:800,color:"#211E19",letterSpacing:"-0.01em"}}>{title}</div>
+          <div style={{fontSize:10,color:"#8A7B63",fontWeight:500}}>{subtitle}</div>
         </div>
       </div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
         <span style={{fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:20,background:color+"14",color:color,border:"1px solid "+color+"30"}}>{tag}</span>
         <button onClick={()=>dispatch({type:"TOGGLE_HINDI"})}
           title={state.hindiMode?"Switch to English":"Switch to Hindi"}
-          style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:8,border:"1px solid #E5E7EB",background:state.hindiMode?"#7C3AED":"#F9FAFB",color:state.hindiMode?"white":"#6B7280",cursor:"pointer",transition:"all 0.2s"}}>
+          style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:8,border:"1px solid "+(state.hindiMode?"#0D3B4F":"rgba(120,95,55,0.2)"),background:state.hindiMode?"#0D3B4F":"rgba(255,253,248,0.8)",color:state.hindiMode?"#F5EEDF":"#6B6355",cursor:"pointer",transition:"all 0.2s"}}>
           {state.hindiMode?"🌐 EN":"🇮🇳 HI"}
         </button>
         <button onClick={()=>dispatch({type:"TOGGLE_DARK"})}
           title={state.darkMode?"Switch to Light mode":"Switch to Dark mode"}
-          style={{fontSize:13,padding:"6px 10px",borderRadius:8,border:"1px solid #E5E7EB",background:state.darkMode?"#1C1C1A":"#F9FAFB",color:state.darkMode?"white":"#6B7280",cursor:"pointer",transition:"all 0.2s"}}>
+          style={{fontSize:13,padding:"6px 10px",borderRadius:8,border:"1px solid "+(state.darkMode?"#211E19":"rgba(120,95,55,0.2)"),background:state.darkMode?"#211E19":"rgba(255,253,248,0.8)",color:state.darkMode?"white":"#6B6355",cursor:"pointer",transition:"all 0.2s"}}>
           {state.darkMode?"☀️":"🌙"}
         </button>
         <button onClick={()=>dispatch({type:"SET_MODE",payload:"home"})}
-          style={{fontSize:11,fontWeight:600,color:"#6B7280",background:"#F9FAFB",border:"1px solid #E5E7EB",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor="#6D5FFA";e.currentTarget.style.color="#6D5FFA";}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor="#E5E7EB";e.currentTarget.style.color="#6B7280";}}>
+          style={{fontSize:11,fontWeight:600,color:"#6B6355",background:"rgba(255,253,248,0.8)",border:"1px solid rgba(120,95,55,0.2)",borderRadius:8,padding:"6px 12px",cursor:"pointer",transition:"all 0.15s"}}
+          onMouseEnter={e=>{e.currentTarget.style.borderColor="#1C7A93";e.currentTarget.style.color="#0D3B4F";}}
+          onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(120,95,55,0.2)";e.currentTarget.style.color="#6B6355";}}>
           ← All modes
         </button>
         <UserChip/>
       </div>
     </header>
+  );
+}
+
+// ── PREMIUM MODE BANNER (illustrative image + warm overlay) ──────────────
+const MODE_BANNERS={
+  hiring:{img:"1521737604893-d14cc237f11d",tint:"#0D3B4F",kicker:"HIRING INTELLIGENCE",line:"Seven agents. One shortlist."},
+  sales:{img:"1556742049-0cfed4f6a45d",tint:"#8A5A12",kicker:"AUTONOMOUS SALES",line:"Prospects, drafted and ready."},
+  support:{img:"1553775282-20af80779df7",tint:"#0F6E56",kicker:"SUPPORT INTELLIGENCE",line:"Your docs, answering for you."},
+  care:{img:"1600880292203-757bb62b4baf",tint:"#8A2E48",kicker:"CUSTOMER CARE",line:"Every ticket, the right tone."},
+  smb:{img:"1604719312566-8912e9227c6a",tint:"#5B3A8A",kicker:"BUSINESS INTELLIGENCE",line:"WhatsApp chaos into a real CRM."},
+  warroom:{img:"1451187580459-43490279c0fa",tint:"#0D3B4F",kicker:"MULTI-AGENT COMMAND",line:"Every agent, firing at once."},
+  brain:{img:"1507413245164-6160d8298b31",tint:"#0F4A5A",kicker:"SHARED MEMORY",line:"One brain. Every agent. No silos."},
+};
+function ModeBanner({mode}){
+  const b=MODE_BANNERS[mode];
+  if(!b) return null;
+  const url=`https://images.unsplash.com/photo-${b.img}?w=1400&q=70&auto=format&fit=crop`;
+  return(
+    <motion.div initial={{opacity:0,y:10}} animate={{opacity:1,y:0}} transition={{duration:0.5}}
+      style={{position:"relative",height:132,borderRadius:16,overflow:"hidden",marginBottom:18,boxShadow:"0 10px 30px rgba(120,95,55,0.12)",border:"1px solid rgba(120,95,55,0.12)"}}>
+      <div style={{position:"absolute",inset:0,backgroundImage:`url(${url})`,backgroundSize:"cover",backgroundPosition:"center",transform:"scale(1.05)"}}/>
+      <div style={{position:"absolute",inset:0,background:`linear-gradient(100deg,${b.tint}F2 0%,${b.tint}CC 42%,${b.tint}33 100%)`}}/>
+      <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(rgba(255,255,255,0.08) 1px,transparent 1px)",backgroundSize:"18px 18px",mixBlendMode:"overlay"}}/>
+      <div style={{position:"relative",zIndex:2,height:"100%",display:"flex",flexDirection:"column",justifyContent:"center",padding:"0 28px"}}>
+        <div style={{fontSize:10,fontWeight:800,letterSpacing:"0.16em",color:"rgba(245,238,223,0.85)",marginBottom:7}}>✦ {b.kicker}</div>
+        <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:26,fontWeight:700,color:"#FBF6EC",letterSpacing:"-0.01em",textShadow:"0 2px 12px rgba(0,0,0,0.25)"}}>{b.line}</div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -5075,7 +5502,7 @@ function AppInner(){
   if(mode==="hiring") return<PageTransition modeKey="hiring"><ErrorBoundary><HiringShell/></ErrorBoundary></PageTransition>;
   if(mode==="overview") return(
     <PageTransition modeKey="overview">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="🗺️" title="Project Overview" subtitle="All features — 2 min read" color="#1C1C1A" tag="NexFlow AI" tagColor="neutral"/>
         <main style={{flex:1,overflow:"hidden"}}><ErrorBoundary><ProjectOverview onNavigate={(m)=>dispatch({type:"SET_MODE",payload:m})}/></ErrorBoundary></main>
         <ToastLayer/>
@@ -5084,34 +5511,34 @@ function AppInner(){
   );
   if(mode==="smb") return(
     <PageTransition modeKey="smb">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="🏪" title="SMB Brain" subtitle="1-Click Indian Business AI" color="#7C3AED" tag="Open Innovation" tagColor="purple"/>
-        <main style={{flex:1,overflowY:"auto",padding:22}}><ErrorBoundary><SMBMode/></ErrorBoundary></main>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><ModeBanner mode="smb"/><ErrorBoundary><SMBMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
   );
   if(mode==="warroom") return(
     <PageTransition modeKey="warroom">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="⚡" title="AI War Room" subtitle="Multi-Agent Command Center" color="#6D5FFA" tag="All agents" tagColor="brand"/>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><ErrorBoundary><WarRoomMode/></ErrorBoundary></main>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><ModeBanner mode="warroom"/><ErrorBoundary><WarRoomMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
   );
   if(mode==="sales") return(
     <PageTransition modeKey="sales">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="🎯" title="SalesFlow AI" subtitle="Autonomous Sales Agent" color="#BA7517" tag="Sales Bot" tagColor="warn"/>
-        <main style={{flex:1,overflowY:"auto",padding:22}}><ErrorBoundary><SalesMode/></ErrorBoundary></main>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><ModeBanner mode="sales"/><ErrorBoundary><SalesMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
   );
   if(mode==="support") return(
     <PageTransition modeKey="support">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="💬" title="SupportFlow AI" subtitle="Intelligent Support Bot" color="#1D9E75" tag="Support Chat Bot" tagColor="success"/>
         <main style={{flex:1,overflow:"hidden",padding:16}}><ErrorBoundary><SupportMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
@@ -5120,14 +5547,145 @@ function AppInner(){
   );
   if(mode==="care") return(
     <PageTransition modeKey="care">
-      <div style={{display:"flex",height:"100vh",background:"#F7F6F3",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
         <ModeHeader icon="❤️" title="CareFlow AI" subtitle="Customer Care Bot" color="#D4537E" tag="Customer Care Bot" tagColor="pink"/>
-        <main style={{flex:1,overflowY:"auto",padding:20}}><ErrorBoundary><CareMode/></ErrorBoundary></main>
+        <main style={{flex:1,overflowY:"auto",padding:20}}><ModeBanner mode="care"/><ErrorBoundary><CareMode/></ErrorBoundary></main>
         <GlobalOverlay/><ToastLayer/><CrossModePanel/>
       </div>
     </PageTransition>
   );
+  if(mode==="brain") return(
+    <PageTransition modeKey="brain">
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="🧩" title="Company Brain" subtitle="Shared cross-agent memory" color="#1C7A93" tag="Shared memory" tagColor="teal"/>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><ModeBanner mode="brain"/><ErrorBoundary><BrainMode/></ErrorBoundary></main>
+        <GlobalOverlay/><ToastLayer/><CrossModePanel/>
+      </div>
+    </PageTransition>
+  );
+  if(mode==="team") return(
+    <PageTransition modeKey="team">
+      <div style={{display:"flex",height:"100vh",background:"linear-gradient(180deg,#F5EEDF 0%,#FBF6EC 100%)",flexDirection:"column",overflow:"hidden"}}>
+        <ModeHeader icon="👥" title="Team" subtitle="Employees & roles" color="#475569" tag="Admin" tagColor="neutral"/>
+        <main style={{flex:1,overflowY:"auto",padding:22}}><ErrorBoundary><TeamMode/></ErrorBoundary></main>
+        <ToastLayer/>
+      </div>
+    </PageTransition>
+  );
   return null;
+}
+
+// Shows real, persisted cross_role_signals rows for this company (not the in-memory
+// crossEvents log) — e.g. a lead handed off from Care, visible here to Sales even in
+// a different browser session, because it's a real DB row scoped by RLS to this company.
+function IncomingSignalsBanner({companyId,type,icon,label,fromLabel}){
+  const[signals,setSignals]=useState([]);
+  const[loading,setLoading]=useState(false);
+  useEffect(()=>{
+    if(!companyId||companyId==="demo"){setSignals([]);return;}
+    let cancelled=false;
+    setLoading(true);
+    listCrossRoleSignals(companyId,type).then(rows=>{
+      if(!cancelled) setSignals((rows||[]).filter(r=>!r.resolved));
+    }).finally(()=>!cancelled&&setLoading(false));
+    return()=>{cancelled=true;};
+  },[companyId,type]);
+  if(!companyId||companyId==="demo"||loading||signals.length===0) return null;
+  const dismiss=async(id)=>{
+    await resolveCrossRoleSignal(id);
+    setSignals(s=>s.filter(x=>x.id!==id));
+  };
+  return(
+    <div style={{marginBottom:14,display:"flex",flexDirection:"column",gap:6}}>
+      {signals.slice(0,3).map(sig=>(
+        <div key={sig.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"#EEF2FF",border:"1.5px solid #C7D2FE",borderRadius:10}}>
+          <div style={{fontSize:16}}>{icon}</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#3730A3"}}>New {label} from {fromLabel}</div>
+            <div style={{fontSize:11,color:"#4338CA"}}>{sig.payload?.name||sig.payload?.candidateName||"Details"} {sig.payload?.painPoint||sig.payload?.role?("— "+(sig.payload.painPoint||sig.payload.role)):""}</div>
+          </div>
+          <button onClick={()=>dismiss(sig.id)} style={{fontSize:10,fontWeight:700,padding:"5px 10px",background:"white",border:"1px solid #C7D2FE",borderRadius:7,color:"#3730A3",cursor:"pointer"}}>Mark handled</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── TEAM (multi-employee admin) ────────────────────────────────────────────
+function TeamMode(){
+  const{state,dispatch,session}=useStore();
+  const toast=useToast();
+  const[team,setTeam]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[email,setEmail]=useState("");
+  const[role,setRole]=useState("sales_rep");
+  const companyId=state.employee?.companyId;
+  const isAdmin=state.employee?.role==="admin";
+
+  const refresh=async()=>{
+    if(!companyId||companyId==="demo"){setLoading(false);return;}
+    setLoading(true);
+    const rows=await listEmployees(companyId);
+    setTeam(rows||[]);
+    setLoading(false);
+  };
+  useEffect(()=>{refresh();},[companyId]);
+
+  if(companyId==="demo") return<Card style={{padding:32,textAlign:"center"}}><div style={{fontSize:32,marginBottom:10}}>👥</div><div style={{fontSize:14,fontWeight:700,color:"#1C1C1A"}}>Demo mode has no real team</div><div style={{fontSize:12,color:"#888780",marginTop:6}}>Sign up with a real account to invite employees and assign roles.</div></Card>;
+  if(!isAdmin) return<Card style={{padding:32,textAlign:"center"}}><div style={{fontSize:32,marginBottom:10}}>🔒</div><div style={{fontSize:14,fontWeight:700,color:"#1C1C1A"}}>Admins only</div><div style={{fontSize:12,color:"#888780",marginTop:6}}>Ask your company admin to manage the team.</div></Card>;
+
+  const handleInvite=async()=>{
+    if(!email.trim()) return;
+    const row=await inviteEmployee(companyId,email.trim(),role);
+    if(row){toast("Invited "+email+" as "+role,"success");setEmail("");refresh();}
+    else toast("Invite failed — check Supabase is configured","error");
+  };
+  const handleRoleChange=async(empId,newRole)=>{
+    await updateEmployeeRole(empId,newRole);
+    toast("Role updated","success");
+    refresh();
+  };
+
+  return(
+    <div style={{maxWidth:640,display:"flex",flexDirection:"column",gap:14}}>
+      <Card style={{padding:22}}>
+        <div style={{fontSize:15,fontWeight:800,color:"#1C1C1A",marginBottom:4}}>Invite an employee</div>
+        <div style={{fontSize:12,color:"#888780",marginBottom:14}}>They'll claim this seat automatically the first time they sign up with this email.</div>
+        <div style={{display:"flex",gap:8}}>
+          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="employee@company.com"
+            style={{flex:1,padding:"10px 12px",borderRadius:8,border:"1.5px solid #EEECEA",fontSize:13}}/>
+          <select value={role} onChange={e=>setRole(e.target.value)} style={{padding:"10px 12px",borderRadius:8,border:"1.5px solid #EEECEA",fontSize:13}}>
+            <option value="hiring_manager">Hiring manager</option>
+            <option value="sales_rep">Sales rep</option>
+            <option value="support_agent">Support agent</option>
+            <option value="care_agent">Care agent</option>
+            <option value="admin">Admin</option>
+          </select>
+          <Btn variant="primary" onClick={handleInvite}>Invite</Btn>
+        </div>
+      </Card>
+      <Card style={{padding:22}}>
+        <div style={{fontSize:15,fontWeight:800,color:"#1C1C1A",marginBottom:14}}>Team ({team.length})</div>
+        {loading&&<div style={{fontSize:12,color:"#888780"}}>Loading...</div>}
+        {!loading&&team.length===0&&<div style={{fontSize:12,color:"#888780"}}>No employees yet — invite your first one above.</div>}
+        {team.map(e=>(
+          <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid #F1F1EE"}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#1C1C1A"}}>{e.invited_email||e.user_id}</div>
+              <div style={{fontSize:10,color:e.status==="active"?"#0F6E56":"#BA7517",fontWeight:700,textTransform:"uppercase"}}>{e.status}</div>
+            </div>
+            <select value={e.role} onChange={ev=>handleRoleChange(e.id,ev.target.value)} style={{padding:"6px 10px",borderRadius:8,border:"1.5px solid #EEECEA",fontSize:12}}>
+              <option value="hiring_manager">Hiring manager</option>
+              <option value="sales_rep">Sales rep</option>
+              <option value="support_agent">Support agent</option>
+              <option value="care_agent">Care agent</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        ))}
+      </Card>
+    </div>
+  );
 }
 
 function ApiKeyBanner(){
@@ -5225,7 +5783,7 @@ function AuthScreen({onAuth}){
         <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:"-0.02em",marginBottom:12}}>
           <span style={{background:"linear-gradient(135deg,#6D5FFA,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>NexFlow AI</span>
         </div>
-        <div style={{fontSize:18,color:"#9CA3AF",lineHeight:1.6,marginBottom:32}}>Multi-agent business intelligence for Indian SMBs. 6 AI agents, one command center.</div>
+        <div style={{fontSize:18,color:"#9CA3AF",lineHeight:1.6,marginBottom:32}}>Multi-agent business intelligence for Indian SMBs. Seven AI systems, one command center.</div>
         {[
           {icon:"🧠",label:"HireFlow — AI hiring pipeline"},
           {icon:"🎯",label:"SalesFlow — autonomous prospecting"},
@@ -5398,6 +5956,46 @@ function HindiSync(){
   return null;
 }
 
+// Resolves which company + role the logged-in user belongs to. Order:
+// 1. They already have an active employee record → use it.
+// 2. Their email matches a pending invite → claim it.
+// 3. Neither → this is their first login, auto-provision a new company with
+//    them as admin. (There's no "create vs. join" choice screen built yet —
+//    see README for that gap. Anyone who was actually invited should sign up
+//    with the invited email BEFORE this runs, so step 2 catches them first.)
+function EmployeeLoader(){
+  const{state,dispatch,session}=useStore();
+  useEffect(()=>{
+    let cancelled=false;
+    if(session?.isDemo){
+      setAuthToken(null);
+      dispatch({type:"SET_EMPLOYEE",payload:{companyId:"demo",role:"admin",companyName:"Demo Company"}});
+      return;
+    }
+    setAuthToken(session?.access_token||null);
+    if(!DB_READY||!session?.user?.id){
+      dispatch({type:"SET_EMPLOYEE",payload:null});
+      return;
+    }
+    (async()=>{
+      const userId=session.user.id;
+      const email=session.user.email;
+      let rec=await getMyEmployeeRecord(userId);
+      if(!rec) rec=await claimInviteIfAny(userId,email);
+      let result=null;
+      if(rec){
+        result={companyId:rec.companyId||rec.company_id,role:rec.role};
+      }else{
+        const name=(session.user.user_metadata?.full_name||email?.split("@")[0]||"My")+"'s Company";
+        const created=await createCompanyAndAdmin(userId,name);
+        if(created) result={companyId:created.companyId,role:created.role,companyName:created.companyName};
+      }
+      if(!cancelled) dispatch({type:"SET_EMPLOYEE",payload:result});
+    })();
+    return()=>{cancelled=true;};
+  },[session?.user?.id,session?.isDemo]);
+  return null;
+}
 function AppDataLoader(){
   const{dispatch}=useStore();
   useEffect(()=>{
@@ -5424,8 +6022,10 @@ export default function App(){
   const handleAuth=(s)=>setSession(s);
   const handleSignOut=async()=>{
     if(session&&!session.isDemo) await authSignOut(session.access_token);
+    setAuthToken(null);
     storeSession(null);
     setSession(null);
+    dispatch({type:"SET_EMPLOYEE",payload:null});
   };
   if(!session){
     return(
@@ -5444,6 +6044,7 @@ export default function App(){
       <div style={{filter:state.darkMode?"invert(1) hue-rotate(180deg)":"none",minHeight:"100vh",transition:"filter 0.3s ease"}}>
       <ApiKeyBanner/>
       <HindiSync/>
+      <EmployeeLoader/>
       <AppDataLoader/>
       <ActivityPanel/>
       <AppInner/>

@@ -137,7 +137,7 @@ const MODES = [
     lightBg: "#F0F9FF",
     border: "#7DD3FC",
     tag: "Multi-Agent",
-    what: "All 6 AI systems run at the same time. Agents don't just work in parallel — they actively communicate, hand off tasks to each other, and cross-reference each other's output in real time.",
+    what: "All the operational agents run at the same time. Agents don't just work in parallel — they actively communicate, hand off tasks to each other, and cross-reference each other's output in real time.",
     howItWorks: [
       { step: "Press Activate all agents", detail: "All 4 core modes (Hiring, Sales, Support, Care) start running simultaneously via Promise.all. Watch the status indicators light up as each mode activates." },
       { step: "Live agent handoffs stream in", detail: "Agents hand off work in real time: HireFlow sends a declined candidate to SalesFlow as a prospect. CareFlow routes an enterprise inquiry to SalesFlow. SalesFlow pushes a common objection into SupportFlow's KB." },
@@ -151,6 +151,30 @@ const MODES = [
       { icon: "💬", title: "Live streaming debates", desc: "Watch each agent reason through its position in real time. Every word streamed token by token." },
       { icon: "📈", title: "Real command report", desc: "Metrics calculated from actual session data — real candidate count, real prospect count, real ROI in INR." },
       { icon: "🌐", title: "Live Agent Network", desc: "Animated network on the home screen shows all 6 agents as nodes with live data-flow pulses between them." },
+    ],
+  },
+  {
+    id: "brain",
+    icon: "🧩",
+    title: "Company Brain",
+    tagline: "Shared Cross-Agent Memory",
+    color: "#0F4A5A",
+    lightBg: "#E1F5EE",
+    border: "#5DCAA5",
+    tag: "Shared Memory",
+    what: "The one memory every agent shares. The same person seen by sales and support becomes a single record — and the Brain surfaces the cross-team move to make next. This is what turns six separate agents into one system.",
+    howItWorks: [
+      { step: "Agents write to a shared graph", detail: "Every action — a care ticket, a sales prospect, a hiring candidate — is recorded as an event in one company-wide memory instead of a siloed list." },
+      { step: "Identity resolution merges duplicates", detail: "The same person seen by two agents is matched on email, then phone, then name, and collapsed into one 360° record with facts merged from every team." },
+      { step: "Next-best-actions are derived", detail: "Deterministic rules read the merged graph and surface cross-silo moves no single agent can see — e.g. resolve an open complaint before sales pitches an upsell." },
+      { step: "Act on it in one click", detail: "Each suggestion routes straight to the right agent, pre-loaded with the context. Same input always produces the same insight — reproducible, not a black box." },
+    ],
+    features: [
+      { icon: "🧠", title: "One memory, every agent", desc: "Sales, support, care and hiring all read and write the same graph — no more silos." },
+      { icon: "🔗", title: "Identity resolution", desc: "Matches the same person across teams on email → phone → name and merges them into one record." },
+      { icon: "⚡", title: "Next-best-action", desc: "Deterministic cross-team suggestions grounded in the actual data, ranked by priority." },
+      { icon: "🕐", title: "Unified timeline", desc: "Every agent action on one company-wide feed, with a 360° view per person." },
+      { icon: "✅", title: "Reproducible & unit-tested", desc: "No hidden LLM call — the same events always produce the same insights. Backed by a passing test suite." },
     ],
   },
 ];
@@ -234,10 +258,10 @@ export function ProjectOverview({ onNavigate }) {
                   </div>
                   <h1 style={{ fontSize: 34, fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.15, marginBottom: 14 }}>
                     NexFlow AI —<br />
-                    <span style={{ background: "linear-gradient(135deg,#534AB7,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>6 Agents. One Platform.</span>
+                    <span style={{ background: "linear-gradient(135deg,#534AB7,#7C3AED)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Seven Systems. One Platform.</span>
                   </h1>
                   <p style={{ fontSize: 15, color: "#6B7280", lineHeight: 1.75, maxWidth: 600 }}>
-                    NexFlow AI runs 6 specialized AI agents — hiring, sales, support, customer care, SMB intelligence, and a War Room where all of them run simultaneously. Every response is real, powered by Llama 3.3 70B via Groq, with actual emails sent, actual data saved, and actual decisions made.
+                    NexFlow AI runs six specialized AI agents — hiring, sales, support, customer care, SMB intelligence, and a War Room where all of them run simultaneously — plus a shared Company Brain that gives them one memory. Every response is real, powered by Llama 3.3 70B via Groq, with actual emails sent, actual data saved, and actual decisions made.
                   </p>
                 </div>
 
@@ -262,7 +286,7 @@ export function ProjectOverview({ onNavigate }) {
                   ))}
                 </div>
 
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 16 }}>6 AI systems at a glance</h2>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 16 }}>Seven AI systems at a glance</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 32 }}>
                   {MODES.map((m) => (
                     <div key={m.id} onClick={() => setActive(m.id)}

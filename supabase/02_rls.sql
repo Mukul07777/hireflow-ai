@@ -6,14 +6,17 @@
 -- 1. PIPELINE_RUNS
 alter table pipeline_runs enable row level security;
 
+drop policy if exists "Users read own pipeline runs" on pipeline_runs;
 create policy "Users read own pipeline runs"
   on pipeline_runs for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users insert own pipeline runs" on pipeline_runs;
 create policy "Users insert own pipeline runs"
   on pipeline_runs for insert
   with check (auth.uid() = user_id);
 
+drop policy if exists "Users update own pipeline runs" on pipeline_runs;
 create policy "Users update own pipeline runs"
   on pipeline_runs for update
   using (auth.uid() = user_id);
@@ -21,6 +24,7 @@ create policy "Users update own pipeline runs"
 -- 2. CANDIDATES (scoped via run ownership)
 alter table candidates enable row level security;
 
+drop policy if exists "Users read candidates for own runs" on candidates;
 create policy "Users read candidates for own runs"
   on candidates for select
   using (
@@ -31,6 +35,7 @@ create policy "Users read candidates for own runs"
     )
   );
 
+drop policy if exists "Users insert candidates for own runs" on candidates;
 create policy "Users insert candidates for own runs"
   on candidates for insert
   with check (
@@ -44,6 +49,7 @@ create policy "Users insert candidates for own runs"
 -- 3. OUTREACH_EMAILS
 alter table outreach_emails enable row level security;
 
+drop policy if exists "Users read own outreach emails" on outreach_emails;
 create policy "Users read own outreach emails"
   on outreach_emails for select
   using (
@@ -54,6 +60,7 @@ create policy "Users read own outreach emails"
     )
   );
 
+drop policy if exists "Users insert own outreach emails" on outreach_emails;
 create policy "Users insert own outreach emails"
   on outreach_emails for insert
   with check (
@@ -64,6 +71,7 @@ create policy "Users insert own outreach emails"
     )
   );
 
+drop policy if exists "Users update own outreach emails" on outreach_emails;
 create policy "Users update own outreach emails"
   on outreach_emails for update
   using (
@@ -77,10 +85,12 @@ create policy "Users update own outreach emails"
 -- 4. SALES_SESSIONS
 alter table sales_sessions enable row level security;
 
+drop policy if exists "Users read own sales sessions" on sales_sessions;
 create policy "Users read own sales sessions"
   on sales_sessions for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users insert own sales sessions" on sales_sessions;
 create policy "Users insert own sales sessions"
   on sales_sessions for insert
   with check (auth.uid() = user_id);
@@ -88,10 +98,12 @@ create policy "Users insert own sales sessions"
 -- 5. SUPPORT_SESSIONS
 alter table support_sessions enable row level security;
 
+drop policy if exists "Users read own support sessions" on support_sessions;
 create policy "Users read own support sessions"
   on support_sessions for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users insert own support sessions" on support_sessions;
 create policy "Users insert own support sessions"
   on support_sessions for insert
   with check (auth.uid() = user_id);
@@ -99,10 +111,12 @@ create policy "Users insert own support sessions"
 -- 6. CARE_TICKETS
 alter table care_tickets enable row level security;
 
+drop policy if exists "Users read own care tickets" on care_tickets;
 create policy "Users read own care tickets"
   on care_tickets for select
   using (auth.uid() = user_id);
 
+drop policy if exists "Users insert own care tickets" on care_tickets;
 create policy "Users insert own care tickets"
   on care_tickets for insert
   with check (auth.uid() = user_id);

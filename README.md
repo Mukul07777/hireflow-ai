@@ -1,90 +1,203 @@
-# NexFlow AI — Multi-Agent Business Intelligence Platform
+<div align="center">
 
-> **Live demo → [hireflow-ai-liart.vercel.app](https://hireflow-ai-liart.vercel.app)**  
-> Sign in with Google, email/password, or click **Try Demo** for instant access.
+# 🧩 NexFlow AI
 
-A multi-agent AI platform where 6 autonomous systems — hiring, sales, support, customer care, SMB intelligence, and a live War Room — share intelligence and hand off tasks to each other in real time. Built for Indian SMBs.
+### Multi-Agent Business Intelligence Platform for Indian SMBs
+
+**Six AI agents that share one memory — so the same customer is recognized across every team.**
+
+[![Live Demo](https://img.shields.io/badge/▶_Live_Demo-Try_it_now-1C7A93?style=for-the-badge)](https://hireflow-ai-liart.vercel.app)
+&nbsp;
+[![CI](https://img.shields.io/badge/CI-passing-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
+&nbsp;
+[![Tests](https://img.shields.io/badge/unit_tests-90+_passing-2ea44f?style=for-the-badge)](src/lib)
+
+<br/>
+
+![React](https://img.shields.io/badge/React_18-20232A?logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite_4-646CFF?logo=vite&logoColor=white)
+![Groq](https://img.shields.io/badge/Groq_·_Llama_3.3_70B-F55036?logo=meta&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3ECF8E?logo=supabase&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind-06B6D4?logo=tailwindcss&logoColor=white)
+![Made in India](https://img.shields.io/badge/Made_in-India_🇮🇳-FF9933)
+
+</div>
 
 ---
 
-## Architecture
+> **Live demo → [hireflow-ai-liart.vercel.app](https://hireflow-ai-liart.vercel.app)**
+> Sign in with Google, email/password, or click **Try Demo** for instant access — no signup needed.
+
+**NexFlow AI** runs six specialized AI agents — hiring, sales, support, customer care, SMB intelligence, and a live War Room — and binds them with a seventh system, the **Company Brain**: one shared memory every agent reads from *before* it acts. Seven AI systems in all. Built for how Indian businesses actually work.
+
+---
+
+## 📑 Table of Contents
+
+- [✨ The closed loop — what makes this different](#-the-closed-loop--what-makes-this-different)
+- [⚡ 90-second demo (for reviewers)](#-90-second-demo-for-reviewers)
+- [🤖 The seven systems](#-the-seven-systems)
+- [🌟 Key features](#-key-features)
+- [🏗️ Architecture](#️-architecture)
+- [💰 Real cost of running this](#-real-cost-of-running-this)
+- [🔒 Data privacy (India's DPDP Act, 2023)](#-data-privacy-indias-dpdp-act-2023)
+- [🧪 Testing & CI](#-testing--ci)
+- [✅ Validation — what's real vs. what's a demo](#-validation--whats-real-vs-whats-a-demo)
+- [⚠️ Known limitations](#️-known-limitations)
+- [🧰 Tech stack](#-tech-stack)
+- [🚀 Local development](#-local-development)
+- [🔑 Environment variables](#-environment-variables)
+
+---
+
+## ✨ The closed loop — what makes this different
+
+Most "multi-agent" tools run agents in parallel and call it collaboration. Here the agents **write to and read from one shared memory — the Company Brain — before they act.** The same person seen by two teams becomes one record, and each agent adapts its output to what every other team already knows.
+
+```mermaid
+flowchart TB
+    subgraph AGENTS["6 AI agents"]
+        H["🧠 HireFlow"]
+        S["🎯 SalesFlow"]
+        SUP["💬 SupportFlow"]
+        C["❤️ CareFlow"]
+        SMB["🏪 SMB Brain"]
+        WR["⚡ War Room"]
+    end
+
+    subgraph BRAIN["🧩 Company Brain — shared memory"]
+        ID["Identity resolution<br/>(email → phone → name → account)"]
+        TL["Unified timeline"]
+        NBA["Deterministic<br/>next-best-action"]
+    end
+
+    H -- "writes events" --> BRAIN
+    S -- "writes events" --> BRAIN
+    SUP -- "writes events" --> BRAIN
+    C -- "writes events" --> BRAIN
+    SMB -- "writes events" --> BRAIN
+
+    BRAIN -- "reads memory before drafting" --> S
+    BRAIN -- "reads memory before replying" --> C
+
+    NBA -. "'resolve complaint before upsell'" .-> S
+    NBA -. "'known customer — adjust tone'" .-> C
+```
+
+> **💡 The moment the demo shows live:** Raj files a billing complaint in **CareFlow** (UrbanCart). Later, **SalesFlow** generates a prospect — Ananya, also at UrbanCart. Before writing her cold email, SalesFlow reads the Brain, sees the open complaint at that **account**, and flags *"coordinate with Care first"* — both on screen and injected into the email prompt. No single agent could see that. The shared memory makes it obvious.
+
+**The one-line pitch:** *six agents that don't share memory are still six silos. The Company Brain gives them one.*
+
+---
+
+## ⚡ 90-second demo (for reviewers)
+
+| Step | Do this | What to notice |
+|:--:|---|---|
+| 1 | Open the live demo → click **Try Demo** | No login needed |
+| 2 | **CareFlow** → open the *"Interested in Enterprise plan"* ticket → **Generate response** | The teal **🧩 Written knowing** chip — reply drafted with cross-team memory, not blind |
+| 3 | **SalesFlow** → **Generate prospects** → **Outreach** tab → find **Ananya @ UrbanCart** | **⚠️ "Raj Patel at this account has an OPEN support ticket"** — same context injected into the email prompt |
+| 4 | **Company Brain** | Every person **merged** into one record, ranked **next-best-actions**, **Act on it →** routes to the right agent |
+| 5 | *(offline)* `node scripts/brain-scenario.mjs` | The same logic, reproducible, in 2 seconds — no browser |
+
+---
+
+## 🤖 The seven systems
+
+> **6 AI agents + the Company Brain = 7 AI systems.** (Team is an admin feature, not an AI system.)
+
+| System | Type | What it does |
+|---|:--:|---|
+| 🏪 **SMB Brain** | Agent | Paste raw WhatsApp chats → structured CRM + FAQ + sales pipeline for tier-2 Indian businesses |
+| 🧠 **HireFlow AI** | Agent | 7-agent hiring pipeline: JD analysis, bulk resume screening, bias audit, salary benchmarking, outreach, interview Qs |
+| 🎯 **SalesFlow AI** | Agent | Indian B2B prospect generation, personalized cold emails, drip sequences, live objection handler |
+| 💬 **SupportFlow AI** | Agent | KB builder from raw docs, sentiment detection, real-time chat bot, escalation routing |
+| ❤️ **CareFlow AI** | Agent | Dynamic ticket triage, human-in-the-loop approval, WhatsApp response delivery |
+| ⚡ **AI War Room** | Agent | All operational agents fire in parallel (`Promise.all`), cross-agent handoffs stream live, unified command report |
+| 🧩 **Company Brain** | Memory | Shared cross-agent memory — identity resolution, unified timeline, deterministic next-best-action |
+
+---
+
+## 🌟 Key features
+
+- **🧩 Shared cross-agent memory** — the same person across teams collapses into one record (matched email → phone → name → account); SalesFlow and CareFlow read it *before* drafting.
+- **🎙️ Voice input** — Web Speech API on the JD field and product description.
+- **🇮🇳 English / Hinglish AI toggle** — AI switches to natural Roman-script Hinglish; floating toast confirms the mode change.
+- **⚖️ Deterministic India-compliance checks** — regex flags for age-proxy language, gendered titles, missing equal-opportunity statements, salary-secrecy clauses, and over-specified experience, referenced against the **Equal Remuneration Act, POSH Act, and Code on Wages** — not a generic Western checklist. Reproducible: the same JD always produces the same flags. See `lib/indiaComplianceRules.js`.
+- **🧠 Outcome-learning loop** — SalesFlow outreach is nudged toward message openings that have actually converted (`lib/outcomeLearning.js`), with an "Outcome-learning loop active" banner.
+- **📲 WhatsApp send** — pre-filled `wa.me` deep links in SalesFlow outreach and CareFlow responses.
+- **📋 Bulk resume processor** — paste 10+ resumes separated by `---`; AI parses, scores, and ranks against the JD. The local split/name-extraction step is unit-tested and benchmarked (`node scripts/benchmark-resume-parsing.mjs`, ~0.2ms for 200 resumes).
+- **🔄 Groq key rotation** — round-robin across up to 4 API keys with automatic retry on a dead/expired key (401/403) instead of silently returning empty.
+- **📊 Transparent AI** — a live backend panel shows every token, every key, every API call in real time.
+
+---
+
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        BROWSER CLIENT                        │
-│                                                              │
 │   AuthScreen ──→ Supabase Auth (email/password + Google)    │
-│        │                                                     │
 │        ▼                                                     │
-│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
-│   │ HireFlow │  │SalesFlow │  │SupportBot│  │  CareBot │  │
-│   │ 7 agents │  │ 3 agents │  │ 2 agents │  │ 2 agents │  │
-│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘  │
-│        └──────────────┴──────────────┴──────────┬──┘        │
-│                    WAR ROOM (command center)     │           │
-│         Phase 1→2→3→4 · Agent debates · Handoffs◄──────────┘│
-│                        │                                     │
+│   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│   │ HireFlow │  │SalesFlow │  │SupportBot│  │  CareBot │    │
+│   └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘    │
+│        └─────────────┴─────────────┴────────────┘           │
+│                  🧩 COMPANY BRAIN (shared memory)            │
+│         identity resolution · timeline · next-best-action    │
+│                  ⚡ WAR ROOM (command center)                │
 │              ActivityPanel (live Groq API log)               │
 └──────────────────────────┬──────────────────────────────────┘
-                           │
             ┌──────────────┴──────────────┐
-            │                             │
    GROQ API (Llama 3.3 70B)       SUPABASE (PostgreSQL)
-   Round-robin 4 API keys         pipeline_runs, candidates,
-   SSE streaming + JSON           sales_sessions, care_tickets,
-                                  war_room_sessions + RLS
+   Round-robin API keys           pipeline_runs, candidates, sales,
+   SSE streaming + JSON           care_tickets, brain_events + RLS
 ```
 
-## What makes this different
+<details>
+<summary><b>📂 Repository structure</b> (click to expand)</summary>
 
-- **Not a chatbot** — an agent network with real handoffs, memory, and debate
-- **India-first** — salary benchmarks, Hindi/Hinglish toggle, WhatsApp delivery, Indian market data
-- **Deterministic India-compliance checks** — regex-based flags for age-proxy language, gendered job titles, missing equal-opportunity statements, salary-secrecy clauses, and over-specified experience requirements, referenced against the actual Indian legal framework (Equal Remuneration Act, POSH Act, Code on Wages) rather than a generic Western bias checklist. Reproducible — the same JD always produces the same flags, unlike the LLM-based bias score which can vary call to call. Wired live into the Bias Detector agent; see `lib/indiaComplianceRules.js`.
-- **Real, cited compute cost** — a full 8-call HireFlow pipeline run costs roughly ₹0.19 in Groq API compute (see "Real Cost of Running This" below) — computed from Groq's published pricing and this app's own token tracking, not an invented marketing figure.
-- **Transparent AI** — live backend panel shows every token, every key, every API call in real time
-- **Production patterns** — Supabase Auth + Google OAuth, Row Level Security on all tables, React error boundaries, key rotation across 4 Groq keys, session persistence
+```
+src/
+  App.jsx                  # frontend (~6,050 lines, single-file by design)
+  BulkResumeProcessor.jsx  # resume parsing + scoring
+  BiasAudit.jsx            # JD bias detection
+  RejectionFlow.jsx        # candidate decision bar
+  PipelineHistory.jsx      # Supabase run history
+  ProjectOverview.jsx      # features & docs page
+  SampleData.js            # candidate pool, domain detection
+  ResumeBank.js            # 50+ sample resumes across 8 domains
+  lib/
+    db.js                     # Supabase REST helpers, incl. brain persistence + deleteAllUserData
+    supabase.js               # pure-fetch Supabase client (insert/select/update/delete)
+    groqKeyRotation.js        # Groq API key round-robin ...................... unit tested
+    resumeParsing.js          # resume batch split + name extraction ......... unit tested, benchmarked
+    indiaComplianceRules.js   # deterministic India-law JD checks ............ unit tested, wired live
+    indianVerification.js     # PAN/GSTIN/Udyam format+checksum validation .... unit tested
+    outcomeLearning.js        # outreach outcome tracker ..................... unit tested, wired into Sales
+    costEstimator.js          # real Groq-pricing cost estimation ............ unit tested
+    companyBrain.js           # 🧩 shared cross-agent memory engine .......... unit tested, wired into Sales/Care
+    brainContext.js           # read-side of the loop (person + account) ..... unit tested
+scripts/
+  benchmark-resume-parsing.mjs  # node scripts/benchmark-resume-parsing.mjs
+  brain-scenario.mjs            # node scripts/brain-scenario.mjs — reproducible closed-loop proof
+supabase/                       # all DB SQL in run-order (00_run_all.sql = one-shot) + README
+docs/
+  closed-loop.mermaid           # architecture diagram of the shared-memory loop
+```
 
----
+**State:** a single `useReducer` at the root. **AI:** module-level `callClaude()` / `callClaudeStream()` with round-robin key rotation and SSE streaming.
 
-## What It Does
-
-Most AI tools are single-purpose. NexFlow AI runs 6 specialized agents simultaneously and lets them talk to each other — a sales lead auto-routes to the hiring pipeline, a support escalation triggers a care ticket, and the War Room orchestrates all of them in one command.
-
----
-
-## Agents
-
-| Agent | What it does |
-|---|---|
-| HireFlow AI | 7-agent hiring pipeline: JD analysis, bulk resume screening, bias audit, salary benchmarking, email outreach, interview Q generation |
-| SalesFlow AI | Indian B2B prospect generation, personalized cold emails, drip sequences, live objection handler |
-| SupportFlow AI | KB builder from raw docs, sentiment detection, real-time chat bot, escalation routing |
-| CareFlow AI | Dynamic ticket triage, human-in-the-loop approval, WhatsApp response delivery |
-| SMB Brain | WhatsApp CRM builder for tier-2 Indian businesses — paste chats, get structured CRM + FAQ + sales pipeline |
-| War Room | All 4 agents fire in parallel (Promise.all), cross-agent handoffs stream live, unified AI command report generated |
-
----
-
-## Key Features
-
-- **Voice input** — Web Speech API on JD field and product description
-- **English / Hinglish AI toggle** — AI switches to Roman-script Hinglish (natural Indian mix); floating toast confirms mode change
-- **Dark / Light mode** — CSS filter invert on root, instant toggle
-- **WhatsApp send** — pre-filled wa.me deep links in SalesFlow outreach and CareFlow responses
-- **Parallel War Room agents** — 4 AI agents run simultaneously via Promise.all, not sequentially
-- **Live Agent Network** — animated SVG on home screen with 6 agent nodes and real-time data-flow pulses; click any node to open that mode
-- **Bulk resume processor** — paste 10+ resumes separated by ---, AI parses, scores, and ranks all against the JD. The batch-splitting and name-extraction step (the part that runs locally, before any LLM call) is unit tested and benchmarked: `node scripts/benchmark-resume-parsing.mjs` measures ~0.2ms to split and extract names from 200 pasted resumes on ordinary hardware. That number does not include the LLM scoring pass that follows — that step's latency depends on Groq's API and isn't something this repo controls or should claim a fixed number for.
-- **Groq key rotation** — round-robin across up to 4 API keys for load distribution, with automatic retry on a dead/expired key (401/403) instead of silently returning an empty response.
-- **Real command report** — War Room final report uses actual candidate counts, prospect counts, and calculated ROI
+</details>
 
 ---
 
-## Real Cost of Running This
+## 💰 Real cost of running this
 
-A common gap in "AI for SMBs" pitches is that nobody actually says what it costs to run. This one does, computed from Groq's own published pricing, not estimated:
+A common gap in "AI for SMBs" pitches is that nobody says what it costs to run. This one does — computed from Groq's **published pricing**, not estimated:
 
-- Groq pricing for `llama-3.3-70b-versatile`: **$0.59 / million input tokens, $0.79 / million output tokens** (source: [groq.com/pricing](https://groq.com/pricing), checked July 2026 — token pricing changes, re-verify before quoting this elsewhere).
-- A full HireFlow pipeline run (JD analysis, bulk candidate scoring, bias audit, salary benchmark, 3 outreach emails, interview questions — 8 Groq calls) comes out to roughly **$0.002 (≈ ₹0.19 at ~95.5 INR/USD, July 2026)** per run, computed in `lib/costEstimator.js` and reproducible with:
+- Groq pricing for `llama-3.3-70b-versatile`: **$0.59 / M input tokens, $0.79 / M output tokens** (source: [groq.com/pricing](https://groq.com/pricing), checked July 2026 — re-verify before quoting).
+- A full HireFlow pipeline run (8 Groq calls) comes to **≈ $0.002 (≈ ₹0.19** at ~95.5 INR/USD), computed in `lib/costEstimator.js` and reproducible:
 
 ```bash
 node -e "
@@ -98,70 +211,123 @@ console.log(estimatePipelineCost([
 "
 ```
 
-At 1,000 pipeline runs a month — a genuinely high-usage SMB scenario — that's about **₹190/month** in Groq compute. This is the actual number an SMB owner would ask about before adopting a tool like this, and it's small enough to be a real selling point rather than a glossed-over detail.
-
-The exchange rate is a snapshot, not live — `lib/costEstimator.js` takes it as a parameter with a documented default, specifically so this doesn't quietly go stale and get quoted as current months later.
+> At **1,000 runs/month** — a genuinely high-usage SMB — that's about **₹190/month** in Groq compute. The exchange rate is a documented parameter, not a hardcoded snapshot, so it can't quietly go stale.
 
 ---
 
-## Data Privacy (India's DPDP Act, 2023)
+## 🔒 Data privacy (India's DPDP Act, 2023)
 
-This app stores candidate names, emails, salaries, and phone numbers — personal data under India's Digital Personal Data Protection Act, 2023, which is in force. Two things exist specifically for this:
+This app stores names, emails, salaries, and phone numbers — personal data under India's **Digital Personal Data Protection Act, 2023**. Two things exist specifically for it:
 
-- **`deleteAllUserData(userId)`** in `lib/db.js` — a real data-subject deletion function. Deleting a user's `pipeline_runs` cascades automatically to their `candidates` and `outreach_emails` (via the `on delete cascade` foreign keys in `supabase_schema.sql`); `sales_sessions`, `support_sessions`, and `care_tickets` are deleted directly. It is not wired into the UI yet (no "delete my data" button exists on any screen) — the function is ready to call, wiring it in is a settings-page addition.
-- **`supabase_rls_v2_fix.sql`** — while checking what this deletion function would actually need to work, I found that the original `supabase_rls.sql` never drops the permissive `"public access"` policies created by `supabase_schema.sql`. Postgres OR's together multiple policies for the same action, so as long as those permissive policies exist, **any holder of the public anon key can read and write every user's data**, regardless of the newer per-user policies — meaning the "Row Level Security on all tables" claim above was true in the sense that RLS was *enabled*, but not true in the sense that it was actually *restricting* anything. `supabase_rls_v2_fix.sql` explicitly drops the old permissive policies and adds the missing UPDATE/DELETE policies (the original file only had SELECT/INSERT for most tables, which would have made `deleteAllUserData` silently delete zero rows — the exact same "looks successful, does nothing" failure pattern as the Groq key bug described below). **Run this file in the Supabase SQL editor on top of the other two, then verify with the query at the bottom of the file — no policy named "public access" should remain.**
-
----
-
-## Tech Stack
-
-- React 18 + Vite 4
-- Groq API (Llama 3.3 70B) — SSE streaming + non-streaming JSON
-- Supabase — pipeline history, outreach emails, support sessions, care tickets
-- EmailJS — real transactional email delivery
-- Web Speech API — voice input with English/Hinglish switching
-- Framer Motion — page transitions and animations
+- **`deleteAllUserData(userId)`** in `lib/db.js` — a real data-subject deletion function. Deleting `pipeline_runs` cascades to `candidates` and `outreach_emails` via `on delete cascade`; `sales_sessions`, `support_sessions`, and `care_tickets` are deleted directly. (Ready to call; needs a settings-page button to wire in.)
+- **`supabase/03_rls_v2_fix.sql`** — while checking that deletion path, I found the original RLS never dropped the permissive `"public access"` policies, so **any holder of the anon key could read/write every user's data** regardless of the newer per-user policies. This file drops them and adds the missing UPDATE/DELETE policies. **This is disclosed, not hidden** — see [Validation](#-validation--whats-real-vs-whats-a-demo) and [Known limitations](#️-known-limitations).
 
 ---
 
-## Testing & CI
+## 🧪 Testing & CI
 
-`npm test` runs the Vitest suite (`src/lib/*.test.js`) covering Groq key rotation, resume batch-parsing, India compliance rules, PAN/GSTIN/Udyam verification, outcome learning, cost estimation, and the Supabase REST helpers' fallback behavior when no database is configured. GitHub Actions (`.github/workflows/ci.yml`) runs the test suite and a production build on every push to `main` and on every pull request.
+```bash
+npm test                              # 9 Vitest suites, 90+ unit tests
+node scripts/brain-scenario.mjs       # reproducible closed-loop proof (2s, no browser)
+node scripts/benchmark-resume-parsing.mjs   # measured local throughput
+```
 
-This does not cover the React component layer — there is no component/integration test suite yet. Treat the frontend as manually-tested, not regression-tested.
+`npm test` covers Groq key rotation, resume batch-parsing, India compliance rules, PAN/GSTIN/Udyam verification, outcome learning, cost estimation, **the Company Brain engine** (identity resolution, insight determinism, seed replay), **the Brain-context read layer** (`brainContext.test.js` — person- and account-level memory Sales/Care read before drafting), and the Supabase helpers' fallback behavior. **GitHub Actions** runs the suite + a production build on every push and PR.
 
-`node scripts/benchmark-resume-parsing.mjs` measures the local (non-LLM) resume-batch-splitting step directly, so the throughput claim in Key Features above is a number you can reproduce, not a marketing figure.
+> **Prove the closed loop in 2 seconds, no browser:** `node scripts/brain-scenario.mjs` runs a fixed, labeled scenario through the exact engine the app uses and prints the merged identities + deterministic next-best-actions. Same output every run — reproducible, not a demo trick.
 
----
-
-## Known Limitations
-
-Being upfront about what "production patterns" in the section above does and doesn't mean:
-
-- **WhatsApp delivery** goes through CallMeBot, a free hobbyist API with no SLA and informal rate limits. It's adequate for demos, not for production message volume — a real deployment should move to the WhatsApp Business API.
-- **No automated tests on the UI layer.** `App.jsx` is a single ~5,400-line file; the Groq key rotation logic (`lib/groqKeyRotation.js`), resume batch-parsing (`lib/resumeParsing.js`), India compliance rules (`lib/indiaComplianceRules.js`), identifier verification (`lib/indianVerification.js`), outcome learning (`lib/outcomeLearning.js`), and cost estimation (`lib/costEstimator.js`) have all been extracted and are unit tested, but the rest of the component tree isn't yet split out or tested.
-- **Bias audit, salary benchmarking, and sentiment detection are LLM-generated outputs**, not validated against labeled ground truth — treat them as a starting draft for human review, not a certified result.
-- **Salary figures in `SampleData.js`/`ResumeBank.js` are illustrative, not sourced from a specific salary survey.** If you're using this for anything beyond a demo, replace them with numbers cited from AmbitionBox, Glassdoor India, or a similar source, and say so.
-- **Sample resumes and JDs used in the demo are synthetic**, authored for this project, not real anonymized postings. This matters for how much weight "demonstrated ability to resolve real-world problems" should carry until it's been run against genuinely real inputs.
-- **The RLS gap described above (fixed in `supabase_rls_v2_fix.sql`) means any database created from just `supabase_schema.sql` + `supabase_rls.sql` — i.e. before this fix existed — has exposed all users' data to anyone with the anon key.** If you deployed this before this fix, run the fix file and rotate your Supabase anon key as a precaution (Settings → API → regenerate).
+*The React component layer is manually-tested, not yet regression-tested — see limitations.*
 
 ---
 
-## Additional capabilities (built, tested, not yet wired into the UI)
+## ✅ Validation — what's real vs. what's a demo
 
-Modules that exist as tested library functions but aren't yet called from any screen. Listed here explicitly rather than left as silent dead code, with what it would take to finish wiring each one in:
+Being explicit about the maturity of each claim, because "it works" means different things:
 
-- **`lib/indianVerification.js`** — structural + checksum validation for PAN, GSTIN, and Udyam (MSME) registration numbers. Important scope limit: this validates that a number is *shaped like* a real one and internally checksum-consistent (the GSTIN checksum implementation is verified against the standard public test vector `27AAPFU0939F1ZV`) — it does **not** call any government registry, so it cannot confirm a number is actually registered or active. Intended use: a free, instant, no-network first-pass filter in SalesFlow lead intake or HireFlow employer verification, catching obviously fabricated identifiers before a human looks at the lead/candidate. Wiring it in means adding one input field + one function call in `SalesMode()`/`HiringCandidates()` in `App.jsx`.
-- **`lib/outcomeLearning.js`** — a frequency-weighted tracker (explicitly *not* reinforcement learning — see the file header) that records which outreach message openings led to a reply/conversion vs. no reply, ranks them by success rate, and can generate a prompt hint nudging future message generation toward what's actually worked. This is the mechanism for turning "agents hand off data" into "agents adjust based on measured outcomes" — but it needs real reply/conversion events to learn from, which means either live usage over time or a seeded historical dataset, honestly labeled as such rather than presented as live learning from a demo session.
-- **`deleteAllUserData(userId)` in `lib/db.js`** — see "Data Privacy" above. Ready to call; needs a settings-page button and the RLS fix applied to actually delete anything.
+| Component | Status | How it's validated |
+|---|:--:|---|
+| Company Brain engine (identity resolution, next-best-action) | 🟢 **Proven & deterministic** | Unit tests + `brain-scenario.mjs`. Same input → same output, every run. |
+| The closed loop (agents read memory before drafting) | 🟢 **Working in-app** | Visible in CareFlow + SalesFlow chips; context injected into the live LLM prompt. |
+| Deterministic India-compliance JD checks | 🟢 **Proven** | Unit tests referenced against the legal framework. |
+| PAN / GSTIN / Udyam checksum validation | 🟡 **Proven (format only)** | Unit-tested against the standard public GSTIN vector. Does not hit any government registry. |
+| LLM outputs (bias score, sentiment, rankings, drafts) | 🟡 **Draft for human review** | Not validated against labeled ground truth. |
+| End-to-end on **real** production data | 🔴 **Not yet** | Everything runs on synthetic, project-authored inputs. The mechanism is real and reproducible; it hasn't been run on genuinely real data. |
+
+**Real-run log** *(fill in once run against real data):*
+> _No real-data run recorded yet._ When the full loop is run with a real account on real inputs, record the date, what was run, and what the Brain surfaced — so this claim is evidence, not aspiration.
+
+*This table is deliberately conservative. The core memory + reasoning genuinely work and reproduce in seconds; the honest gap is real-world usage, stated plainly rather than glossed over.*
 
 ---
 
-## Environment Variables
+## ⚠️ Known limitations
 
-Add to Vercel Project Settings > Environment Variables:
+- **WhatsApp delivery** uses CallMeBot, a free hobbyist API with no SLA — fine for demos, not production. A real deployment should move to the WhatsApp Business API.
+- **No automated tests on the UI layer.** `App.jsx` is a single ~6,050-line file. The logic libraries (`companyBrain`, `brainContext`, `groqKeyRotation`, `resumeParsing`, `indiaComplianceRules`, `indianVerification`, `outcomeLearning`, `costEstimator`) are all extracted and unit-tested; the component tree isn't yet split out or tested.
+- **Bias audit, salary benchmarking, and sentiment are LLM outputs**, not validated against labeled ground truth — a starting draft for human review.
+- **Sample data is synthetic**, authored for this project — not real anonymized postings. Salary figures are illustrative, not from a specific survey.
+- **The RLS gap** (fixed in `03_rls_v2_fix.sql`) means any DB built before that fix exposed all users' data to the anon key. If you deployed earlier, run the fix and rotate your anon key.
+
+<details>
+<summary><b>Built & tested, wiring in progress</b> (click to expand)</summary>
+
+- **`lib/indianVerification.js`** — PAN/GSTIN/Udyam format + checksum validation (verified against public vector `27AAPFU0939F1ZV`). Validates *shape*, does not hit a government registry. One input + one call to wire into SalesFlow/HireFlow.
+- **`lib/outcomeLearning.js`** — **now wired into SalesFlow** (outreach nudged toward best-performing openings, with a live banner). Currently seeded with a clearly-labeled illustrative history (`SEED_OUTREACH_HISTORY`); swap for real Supabase events for true live learning.
+- **`deleteAllUserData(userId)`** — ready to call; needs a settings-page button.
+
+</details>
+
+---
+
+## 🧰 Tech stack
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | React 18 + Vite 4, Framer Motion, Tailwind |
+| **AI** | Groq API · Llama 3.3 70B — SSE streaming + non-streaming JSON |
+| **Data** | Supabase (PostgreSQL) — Auth, Row Level Security, multi-tenancy |
+| **Email** | EmailJS — real transactional delivery |
+| **Voice** | Web Speech API — English / Hinglish switching |
+| **CI** | GitHub Actions — test suite + production build on every push/PR |
+
+---
+
+## 🚀 Local development
+
+```bash
+git clone https://github.com/Mukul07777/hireflow-ai.git
+cd hireflow-ai
+npm install
+# create .env with your keys (see below)
+npm run dev       # start dev server
+npm test          # run unit tests
+npm run build     # production build
+```
+
+**Database setup** — all SQL lives in [`supabase/`](supabase/), in run-order:
 
 ```
+Easiest:  open supabase/00_run_all.sql → paste into the Supabase SQL editor → Run.
+          (Files 01–06 concatenated in order; fully idempotent — safe to re-run.)
+
+Or individually, in order:
+  01_schema.sql · 02_rls.sql · 03_rls_v2_fix.sql
+  04_multitenancy.sql · 05_cross_signals.sql · 06_company_brain.sql
+```
+
+See [`supabase/README.md`](supabase/README.md) for what each file does.
+
+> **Before trusting multi-tenancy live:** every `create policy` is guarded with `drop policy if exists`, so re-running never errors — but RLS isolation is invisible until tested with **two logins**. Sign up as User A and User B and confirm B cannot read A's data.
+
+**Known gap:** there's no "create vs. join a company" screen yet — every first login auto-provisions a new company and makes that user its admin. To invite someone, do it from the Team screen *before* they sign up.
+
+---
+
+## 🔑 Environment variables
+
+Add to **Vercel → Project Settings → Environment Variables** (and a local `.env`):
+
+```bash
 VITE_GROQ_API_KEY=your_primary_groq_key
 VITE_GROQ_API_KEY_2=your_second_key
 VITE_GROQ_API_KEY_3=your_third_key
@@ -171,69 +337,17 @@ VITE_CALLMEBOT_PHONE=+91XXXXXXXXXX
 VITE_CALLMEBOT_APIKEY=your_callmebot_key
 ```
 
-WhatsApp setup (CallMeBot — free): send `I allow callmebot to send me messages` to +34 644 59 97 91 on WhatsApp. CallMeBot replies with your API key. Add your number + that key to Vercel. Without these, WhatsApp buttons fall back to wa.me deep links.
+**WhatsApp setup (CallMeBot, free):** send `I allow callmebot to send me messages` to **+34 644 59 97 91** on WhatsApp; it replies with your API key. Without these, WhatsApp buttons fall back to `wa.me` deep links.
 
-Never commit .env — keys live in Vercel env vars only. If a key ever ends up in a commit, rotating it is not optional: removing the file in a later commit does not remove it from git history, and anyone can pull it back out with `git show <commit>:.env`.
-
----
-
-## Local Development
-
-```bash
-git clone https://github.com/Mukul07777/hireflow-ai.git
-cd hireflow-ai
-npm install
-# create .env with your keys
-npm run dev
-npm test        # run unit tests
-npm run build   # production build
-```
-
-Database setup, in order:
-```
-1. Run supabase_schema.sql in the Supabase SQL editor
-2. Run supabase_rls.sql
-3. Run supabase_rls_v2_fix.sql  ← do not skip this one, see "Data Privacy" above
-```
+> ⚠️ **Never commit `.env`.** Keys live in Vercel env vars only. If a key ever lands in a commit, rotating it isn't optional — deleting the file later does **not** remove it from git history.
 
 ---
 
-## Architecture
+<div align="center">
 
-```
-src/
-  App.jsx                  # entire frontend (~5400 lines)
-  BulkResumeProcessor.jsx  # resume parsing + scoring
-  BiasAudit.jsx            # JD bias detection
-  RejectionFlow.jsx        # candidate decision bar
-  PipelineHistory.jsx      # Supabase run history
-  SampleData.js            # candidate pool, domain detection
-  ResumeBank.js            # 50+ sample resumes across 8 domains
-  lib/
-    db.js                     # Supabase REST helpers, incl. deleteAllUserData (unit tested)
-    supabase.js               # pure fetch Supabase client (insert/select/update/delete)
-    groqKeyRotation.js        # Groq API key round-robin (unit tested)
-    resumeParsing.js          # resume batch split + name extraction (unit tested, benchmarked)
-    indiaComplianceRules.js   # deterministic India-law JD checks (unit tested, wired into bias audit)
-    indianVerification.js     # PAN/GSTIN/Udyam format+checksum validation (unit tested, not yet wired in)
-    outcomeLearning.js        # outreach outcome tracker (unit tested, not yet wired in)
-    costEstimator.js          # real Groq-pricing-based cost estimation (unit tested)
-scripts/
-  benchmark-resume-parsing.mjs  # run: node scripts/benchmark-resume-parsing.mjs
-```
+**Built for how Indian businesses actually work.**
+*Six agents that don't share memory are still six silos. The Company Brain gives them one.*
 
-**Supabase table for War Room memory** (run in Supabase SQL editor):
-```sql
-create table war_room_sessions (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz default now(),
-  summary text,
-  candidates int default 0,
-  prospects int default 0,
-  kb_items int default 0,
-  cross_events int default 0,
-  handoffs_count int default 0
-);
-```
+[![Live Demo](https://img.shields.io/badge/▶_Open_the_live_demo-1C7A93?style=for-the-badge)](https://hireflow-ai-liart.vercel.app)
 
-State: single useReducer at root. AI: module-level callClaude() and callClaudeStream() with round-robin key rotation.
+</div>

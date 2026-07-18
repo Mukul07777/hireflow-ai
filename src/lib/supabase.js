@@ -5,11 +5,37 @@ const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 export const DB_READY =
   !!SUPABASE_URL && SUPABASE_URL !== 'https://YOUR_PROJECT_ID.supabase.co'
 
-const headers = {
-  'Content-Type': 'application/json',
-  'apikey': SUPABASE_KEY,
-  'Authorization': `Bearer ${SUPABASE_KEY}`,
-  'Prefer': 'return=representation',
+// ── Auth token wiring ──────────────────────────────────────────────────────
+// CRITICAL: every RLS policy in this app (auth.uid() = user_id, or the newer
+// company/employees-scoped policies) depends on Postgres seeing the CALLING
+// USER'S identity via their JWT. Supabase only resolves auth.uid() when the
+// request's Authorization header carries that user's access token — the
+// 'apikey' header (anon key) alone does NOT do this, it just authorizes the
+// request as "some anonymous client allowed to hit the API at all."
+// Previously this file always sent `Authorization: Bearer <anon key>` for
+// every request, regardless of who was logged in. That means auth.uid() was
+// NULL on every single request this app has ever made, which means every
+// "auth.uid() = user_id" (or employees-join) RLS policy could only ever have
+// been satisfied by accident — the only reason reads/writes worked at all is
+// that supabase_schema.sql's permissive "public access" policy was still
+// present and OR'd in. Once supabase_rls_v2_fix.sql (which drops that
+// permissive policy) is run, every read and write in this app would have
+// silently started failing — dbSelect returning [], dbInsert/dbUpdate/dbDelete
+// returning null — with no thrown error, which is the worst possible failure
+// mode because it looks like "no data" rather than a crash.
+// setAuthToken() below must be called with the logged-in user's access_token
+// whenever a session starts, and with null on sign-out / demo mode.
+let _userAccessToken = null
+export function setAuthToken(token) {
+  _userAccessToken = token || null
+}
+function getHeaders() {
+  return {
+    'Content-Type': 'application/json',
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${_userAccessToken || SUPABASE_KEY}`,
+    'Prefer': 'return=representation',
+  }
 }
 
 /** INSERT a row, returns the inserted row or null */
@@ -18,7 +44,7 @@ export async function dbInsert(table, row) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
       method: 'POST',
-      headers,
+      headers: getHeaders(),
       body: JSON.stringify(row),
     })
     if (!res.ok) { console.error(`dbInsert ${table}:`, await res.text()); return null }
@@ -33,7 +59,7 @@ export async function dbInsertMany(table, rows) {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
       method: 'POST',
-      headers,
+      headers: getHeaders(),
       body: JSON.stringify(rows),
     })
     if (!res.ok) { console.error(`dbInsertMany ${table}:`, await res.text()); return null }
@@ -47,7 +73,7 @@ export async function dbSelect(table, params = {}, orderBy = 'created_at.desc', 
   try {
     const qs = new URLSearchParams({ order: orderBy, limit })
     Object.entries(params).forEach(([k, v]) => qs.set(k, v))
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, { headers })
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, { headers: getHeaders() })
     if (!res.ok) { console.error(`dbSelect ${table}:`, await res.text()); return [] }
     return await res.json()
   } catch (e) { console.error(`dbSelect ${table}:`, e); return [] }
@@ -60,7 +86,7 @@ export async function dbUpdate(table, filter, updates) {
     const qs = new URLSearchParams(filter)
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
       method: 'PATCH',
-      headers,
+      headers: getHeaders(),
       body: JSON.stringify(updates),
     })
     if (!res.ok) { console.error(`dbUpdate ${table}:`, await res.text()); return null }
@@ -75,7 +101,7 @@ export async function dbDelete(table, filter) {
     const qs = new URLSearchParams(filter)
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${qs}`, {
       method: 'DELETE',
-      headers,
+      headers: getHeaders(),
     })
     if (!res.ok) { console.error(`dbDelete ${table}:`, await res.text()); return null }
     return await res.json()
