@@ -93,6 +93,28 @@ export async function saveSupportSession({ docs, kb, chats, user_id, company_id 
 
 // ── CARE TICKETS ──────────────────────────────────────────────────────────
 
+/**
+ * care_tickets.sentiment is a numeric column (-1..1). Callers mostly pass a number,
+ * but some paths (and older sample data) use words like "negative"/"positive". Sending
+ * a string made Postgres reject the whole insert with 22P02 — the ticket silently
+ * failed to save while the UI showed success. Coerce here so one bad field can't drop
+ * the record; anything unrecognised becomes null rather than breaking the write.
+ */
+export function toNumericSentiment(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(-1, Math.min(1, value))
+  }
+  if (typeof value === 'string') {
+    const word = value.trim().toLowerCase()
+    if (word === 'negative') return -0.6
+    if (word === 'positive') return 0.6
+    if (word === 'neutral') return 0
+    const parsed = Number(word)
+    if (Number.isFinite(parsed)) return Math.max(-1, Math.min(1, parsed))
+  }
+  return null
+}
+
 export async function saveCareTicket({ ticket, toneUsed, aiResponse, approved, user_id, company_id }) {
   if (!DB_READY) return null
   const row = await dbInsert('care_tickets', {
@@ -103,7 +125,7 @@ export async function saveCareTicket({ ticket, toneUsed, aiResponse, approved, u
     message: ticket.message,
     priority: ticket.priority,
     category: ticket.category,
-    sentiment: ticket.sentiment,
+    sentiment: toNumericSentiment(ticket.sentiment),
     tone_used: toneUsed,
     ai_response: aiResponse,
     approved,
