@@ -5662,97 +5662,122 @@ function AuthScreen({onAuth}){
 
   if(checkingSession){
     return(
-      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#0F0F1A 0%,#1E1B4B 50%,#0F172A 100%)"}}>
+      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"radial-gradient(130% 90% at 50% -10%,#F8F2E4 0%,#F0E7D5 52%,#F5EEDF 100%)"}}>
         <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16}}>
-          <div style={{width:48,height:48,border:"3px solid rgba(109,95,250,0.3)",borderTopColor:"#6D5FFA",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-          <div style={{color:"#6B7280",fontSize:13}}>Restoring session...</div>
+          <div style={{width:48,height:48,border:"3px solid rgba(184,137,74,0.25)",borderTopColor:"#0D3B4F",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <div style={{color:"#6B6355",fontSize:13,fontWeight:600}}>Restoring session…</div>
         </div>
       </div>
     );
   }
 
   return(
-    <div style={{minHeight:"100vh",display:"flex",background:"linear-gradient(135deg,#0F0F1A 0%,#1E1B4B 50%,#0F172A 100%)"}}>
-      {/* Left panel — branding */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 48px"}} className="auth-left">
-        <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:"-0.02em",marginBottom:12}}>
-          <span style={{background:"linear-gradient(135deg,#6D5FFA,#A78BFA)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>NexFlow AI</span>
+    <div style={{minHeight:"100vh",display:"flex",background:"radial-gradient(130% 90% at 50% -10%,#F8F2E4 0%,#F0E7D5 52%,#F5EEDF 100%)",fontFamily:"Inter,system-ui,sans-serif",position:"relative",overflow:"hidden"}}>
+      {/* warm ambient glow + dotted texture, same language as the home hero */}
+      <div style={{position:"absolute",top:-160,left:"18%",width:760,height:560,borderRadius:"50%",background:"radial-gradient(circle,rgba(212,178,120,0.28) 0%,transparent 68%)",pointerEvents:"none"}}/>
+      <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(rgba(120,95,55,0.06) 1px,transparent 1px)",backgroundSize:"22px 22px",pointerEvents:"none",maskImage:"linear-gradient(180deg,black 0%,transparent 85%)",WebkitMaskImage:"linear-gradient(180deg,black 0%,transparent 85%)"}}/>
+
+      {/* Left panel — branding + closed-loop diagram */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 56px",position:"relative",zIndex:2}} className="auth-left">
+        <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,253,248,0.85)",border:"1px solid rgba(184,137,74,0.4)",borderRadius:22,padding:"6px 16px",marginBottom:22,alignSelf:"flex-start"}}>
+          <span style={{fontSize:12}}>🇮🇳</span>
+          <span style={{fontSize:10.5,fontWeight:800,color:"#9A6A2E",letterSpacing:"0.03em"}}>Built for how Indian businesses actually work</span>
         </div>
-        <div style={{fontSize:18,color:"#9CA3AF",lineHeight:1.6,marginBottom:32}}>Multi-agent business intelligence for Indian SMBs. Seven AI systems, one command center.</div>
-        {[
-          {icon:"🧠",label:"HireFlow — AI hiring pipeline"},
-          {icon:"🎯",label:"SalesFlow — autonomous prospecting"},
-          {icon:"⚡",label:"War Room — agent command center"},
-          {icon:"🔮",label:"Predictive intelligence"},
-        ].map((f,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-            <div style={{width:36,height:36,background:"rgba(109,95,250,0.15)",border:"1px solid rgba(109,95,250,0.3)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{f.icon}</div>
-            <div style={{fontSize:14,color:"#D1D5DB"}}>{f.label}</div>
-          </div>
-        ))}
+
+        <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:44,fontWeight:800,color:"#211E19",letterSpacing:"-0.02em",lineHeight:1.05,marginBottom:14}}>
+          NexFlow AI
+        </div>
+        <div style={{fontSize:16.5,color:"#6B6355",lineHeight:1.7,marginBottom:30,maxWidth:460}}>
+          <b style={{color:"#3A342A"}}>Six AI agents. One shared memory.</b> Hiring, sales, support, care and SMB intelligence that finally recognise the same customer across every team.
+        </div>
+
+        {/* Closed-loop diagram — the whole idea in one glance */}
+        <svg width="100%" height="200" viewBox="0 0 460 200" style={{maxWidth:460,marginBottom:26}}>
+          <defs>
+            <linearGradient id="brainG" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stopColor="#0D3B4F"/><stop offset="60%" stopColor="#1C7A93"/><stop offset="100%" stopColor="#B8894A"/>
+            </linearGradient>
+          </defs>
+          {[[60,32],[230,20],[400,32],[60,168],[230,180],[400,168]].map(([x,y],i)=>(
+            <line key={i} x1={x} y1={y} x2="230" y2="100" stroke="#B8894A" strokeWidth="1.4" strokeOpacity="0.5" strokeDasharray="4 4"/>
+          ))}
+          {[["🧠","HireFlow",60,32],["🎯","SalesFlow",230,20],["💬","Support",400,32],["🏪","SMB",60,168],["❤️","CareFlow",230,180],["⚡","War Room",400,168]].map(([ic,label,x,y],i)=>(
+            <g key={i}>
+              <rect x={x-46} y={y-15} width="92" height="30" rx="15" fill="#FFFDF8" stroke="rgba(120,95,55,0.28)"/>
+              <text x={x} y={y+5} textAnchor="middle" fontSize="11" fontWeight="700" fill="#3A342A">{ic} {label}</text>
+            </g>
+          ))}
+          <circle cx="230" cy="100" r="40" fill="url(#brainG)"/>
+          <text x="230" y="96" textAnchor="middle" fontSize="16" fill="#FBF6EC">🧩</text>
+          <text x="230" y="112" textAnchor="middle" fontSize="9.5" fontWeight="800" fill="#FBF6EC" letterSpacing="0.5">BRAIN</text>
+        </svg>
+
+        <div style={{fontSize:12.5,color:"#8A7B63",fontWeight:600,maxWidth:440,lineHeight:1.6}}>
+          Every agent writes to the Company Brain — and <b style={{color:"#9A6A2E"}}>reads from it before it acts.</b>
+        </div>
       </div>
 
       {/* Right panel — auth form */}
-      <div style={{width:"100%",maxWidth:440,margin:"auto",padding:32,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+      <div style={{width:"100%",maxWidth:440,margin:"auto",padding:32,display:"flex",flexDirection:"column",justifyContent:"center",position:"relative",zIndex:2}}>
         <motion.div initial={{opacity:0,y:24}} animate={{opacity:1,y:0}} transition={{duration:0.4}}
-          style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:20,padding:36,backdropFilter:"blur(12px)"}}>
+          style={{background:"#FFFDF8",border:"1px solid rgba(120,95,55,0.18)",borderRadius:20,padding:36,boxShadow:"0 18px 50px rgba(120,95,55,0.14)"}}>
 
           {/* Logo */}
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:28}}>
-            <div style={{width:40,height:40,background:"linear-gradient(135deg,#534AB7,#7F77DD)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:"0 0 20px rgba(109,95,250,0.4)"}}>⚡</div>
+          <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:26}}>
+            <div style={{width:40,height:40,background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",fontSize:19,boxShadow:"0 6px 18px rgba(13,59,79,0.28)"}}>⚡</div>
             <div>
-              <div style={{fontSize:18,fontWeight:900,color:"#fff"}}>NexFlow AI</div>
-              <div style={{fontSize:11,color:"#6B7280"}}>Multi-Agent Intelligence Platform</div>
+              <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:19,fontWeight:800,color:"#211E19"}}>NexFlow AI</div>
+              <div style={{fontSize:10.5,color:"#8A7B63",fontWeight:600}}>Multi-Agent Intelligence Platform</div>
             </div>
           </div>
 
-          <div style={{fontSize:22,fontWeight:800,color:"#fff",marginBottom:4}}>{mode==="login"?"Welcome back":"Create account"}</div>
-          <div style={{fontSize:13,color:"#6B7280",marginBottom:24}}>{mode==="login"?"Sign in to your workspace":"Start your free workspace"}</div>
+          <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:27,fontWeight:800,color:"#211E19",marginBottom:5,letterSpacing:"-0.01em"}}>{mode==="login"?"Welcome back":"Create account"}</div>
+          <div style={{fontSize:13,color:"#6B6355",marginBottom:24}}>{mode==="login"?"Sign in to your workspace":"Start your free workspace"}</div>
 
           {/* Google OAuth */}
           {SB_AUTH&&(
-            <a href={authGoogleUrl()} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,width:"100%",padding:"11px 16px",background:"#fff",borderRadius:10,border:"none",fontSize:13,fontWeight:700,color:"#111",cursor:"pointer",textDecoration:"none",marginBottom:16,boxSizing:"border-box"}}>
+            <a href={authGoogleUrl()} style={{display:"flex",alignItems:"center",justifyContent:"center",gap:10,width:"100%",padding:"12px 16px",background:"#fff",borderRadius:999,border:"1px solid rgba(120,95,55,0.28)",fontSize:13,fontWeight:700,color:"#211E19",cursor:"pointer",textDecoration:"none",marginBottom:16,boxSizing:"border-box",boxShadow:"0 2px 8px rgba(120,95,55,0.06)"}}>
               <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 6.29C4.672 4.163 6.656 3.58 9 3.58z"/></svg>
               Continue with Google
             </a>
           )}
 
-          {SB_AUTH&&<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}><div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/><span style={{fontSize:11,color:"#4B5563"}}>or</span><div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/></div>}
+          {SB_AUTH&&<div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}><div style={{flex:1,height:1,background:"rgba(120,95,55,0.18)"}}/><span style={{fontSize:11,color:"#8A7B63",fontWeight:600}}>or</span><div style={{flex:1,height:1,background:"rgba(120,95,55,0.18)"}}/></div>}
 
           {/* Form */}
           <form onSubmit={submit}>
             {mode==="signup"&&(
               <div style={{marginBottom:12}}>
-                <label style={{fontSize:11,fontWeight:700,color:"#9CA3AF",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Full Name</label>
-                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Aryan Sharma" style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,fontSize:13,color:"#fff",outline:"none",boxSizing:"border-box"}}/>
+                <label style={{fontSize:10.5,fontWeight:800,color:"#3A342A",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em"}}>Full Name</label>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Aryan Sharma" style={{width:"100%",padding:"12px 14px",background:"#FBF6EC",border:"1px solid rgba(120,95,55,0.22)",borderRadius:10,fontSize:13,color:"#211E19",outline:"none",boxSizing:"border-box"}}/>
               </div>
             )}
             <div style={{marginBottom:12}}>
-              <label style={{fontSize:11,fontWeight:700,color:"#9CA3AF",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Email</label>
-              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com" style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,fontSize:13,color:"#fff",outline:"none",boxSizing:"border-box"}}/>
+              <label style={{fontSize:10.5,fontWeight:800,color:"#3A342A",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em"}}>Email</label>
+              <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@company.com" style={{width:"100%",padding:"12px 14px",background:"#FBF6EC",border:"1px solid rgba(120,95,55,0.22)",borderRadius:10,fontSize:13,color:"#211E19",outline:"none",boxSizing:"border-box"}}/>
             </div>
             <div style={{marginBottom:error?12:20}}>
-              <label style={{fontSize:11,fontWeight:700,color:"#9CA3AF",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Password</label>
-              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,fontSize:13,color:"#fff",outline:"none",boxSizing:"border-box"}}/>
+              <label style={{fontSize:10.5,fontWeight:800,color:"#3A342A",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em"}}>Password</label>
+              <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" style={{width:"100%",padding:"12px 14px",background:"#FBF6EC",border:"1px solid rgba(120,95,55,0.22)",borderRadius:10,fontSize:13,color:"#211E19",outline:"none",boxSizing:"border-box"}}/>
             </div>
-            {error&&<div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"8px 12px",marginBottom:16,fontSize:12,color:"#FCA5A5"}}>{error}</div>}
-            <button type="submit" disabled={loading} style={{width:"100%",padding:"12px",background:"linear-gradient(135deg,#534AB7,#6D5FFA)",border:"none",borderRadius:10,color:"#fff",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",opacity:loading?0.7:1,transition:"all 0.2s"}}>
-              {loading?(mode==="login"?"Signing in...":"Creating account..."):(mode==="login"?"Sign In":"Create Account")}
+            {error&&<div style={{background:"#FBEAF0",border:"1px solid #ED93B1",borderRadius:8,padding:"9px 12px",marginBottom:16,fontSize:12,color:"#993556",fontWeight:600}}>{error}</div>}
+            <button type="submit" disabled={loading} style={{width:"100%",padding:"13px",background:loading?"#8A7B63":"#211E19",border:"none",borderRadius:999,color:"#F5EEDF",fontSize:14,fontWeight:700,cursor:loading?"not-allowed":"pointer",transition:"all 0.2s",boxShadow:loading?"none":"0 8px 22px rgba(33,30,25,0.26)"}}>
+              {loading?(mode==="login"?"Signing in…":"Creating account…"):(mode==="login"?"Sign In":"Create Account")}
             </button>
           </form>
 
-          <div style={{textAlign:"center",marginTop:16,fontSize:12,color:"#6B7280"}}>
+          <div style={{textAlign:"center",marginTop:16,fontSize:12,color:"#6B6355"}}>
             {mode==="login"?"Don't have an account? ":"Already have an account? "}
-            <button onClick={()=>{setMode(mode==="login"?"signup":"login");setError("");}} style={{background:"none",border:"none",color:"#818CF8",cursor:"pointer",fontWeight:700,fontSize:12}}>
+            <button onClick={()=>{setMode(mode==="login"?"signup":"login");setError("");}} style={{background:"none",border:"none",color:"#9A6A2E",cursor:"pointer",fontWeight:800,fontSize:12}}>
               {mode==="login"?"Sign up free":"Sign in"}
             </button>
           </div>
 
           {/* Demo bypass */}
-          <div style={{borderTop:"1px solid rgba(255,255,255,0.06)",marginTop:20,paddingTop:20,textAlign:"center"}}>
-            <div style={{fontSize:11,color:"#4B5563",marginBottom:10}}>Evaluating the platform?</div>
+          <div style={{borderTop:"1px solid rgba(120,95,55,0.16)",marginTop:20,paddingTop:20,textAlign:"center"}}>
+            <div style={{fontSize:11,color:"#8A7B63",marginBottom:10,fontWeight:600}}>Evaluating the platform?</div>
             <button onClick={()=>onAuth({access_token:"demo",user:{email:"demo@flowzint.ai",user_metadata:{full_name:"Demo User"}},isDemo:true})}
-              style={{width:"100%",padding:"10px",background:"rgba(109,95,250,0.08)",border:"1px solid rgba(109,95,250,0.25)",borderRadius:10,color:"#818CF8",fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.2s"}}>
+              style={{width:"100%",padding:"12px",background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",border:"none",borderRadius:999,color:"#F5F8F8",fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.2s",boxShadow:"0 8px 20px rgba(13,59,79,0.24)"}}>
               Try Demo — No signup needed
             </button>
           </div>
