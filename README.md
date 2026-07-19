@@ -285,10 +285,37 @@ Being explicit about the maturity of each claim, because "it works" means differ
 | Deterministic India-compliance JD checks | 🟢 **Proven** | Unit tests referenced against the legal framework. |
 | PAN / GSTIN / Udyam checksum validation | 🟡 **Proven (format only)** | Unit-tested against the standard public GSTIN vector. Does not hit any government registry. |
 | LLM outputs (bias score, sentiment, rankings, drafts) | 🟡 **Draft for human review** | Not validated against labeled ground truth. |
-| End-to-end on **real** production data | 🔴 **Not yet** | Everything runs on synthetic, project-authored inputs. The mechanism is real and reproducible; it hasn't been run on genuinely real data. |
+| Live Groq API end-to-end | 🟢 **Verified — measured** | `node scripts/real-run.mjs`, 4 real calls, real latency/tokens/cost. Log below. |
+| End-to-end on **real customer** data | 🔴 **Not yet** | The API layer and the loop are verified against the live model, but the *inputs* are still synthetic, project-authored records — not real resumes/tickets from a real business. |
 
-**Real-run log** *(fill in once run against real data):*
-> _No real-data run recorded yet._ When the full loop is run with a real account on real inputs, record the date, what was run, and what the Brain surfaced — so this claim is evidence, not aspiration.
+### Real-run log — 2026-07-19
+
+Executed `node scripts/real-run.mjs` against the **live Groq API** (`llama-3.3-70b-versatile`).
+Real calls, real latency, real tokens — no mocks, reproducible on any machine with a key.
+
+| Step | Latency | Tokens (in/out) |
+|---|--:|--:|
+| JD analysis | 433 ms | 110 / 75 |
+| Bias audit | 1142 ms | 90 / 321 |
+| SalesFlow email **with Company Brain context** | 1920 ms | 136 / 303 |
+| CareFlow reply **with Company Brain context** | 916 ms | 155 / 203 |
+| **Total** | **4411 ms** | **491 / 902** |
+
+Measured cost for the run: **$0.00100 (≈ ₹0.096)** at Groq's published pricing
+($0.59/M in, $0.79/M out; ₹95.5/USD) — consistent with the ₹0.19 full-pipeline estimate above.
+
+The Company Brain injected this cross-team context **before** the sales email was generated:
+> ✓ This exact contact is already known to Care
+> ⚠️ They have an open complaint — align with Care before pitching
+
+**And the model demonstrably used it.** The generated email came back with:
+
+> *"Before I dive into the details of our solution, I wanted to acknowledge that we're aware of
+> your existing relationship with our team, particularly with Care."*
+
+That is the closed loop working end-to-end on a live model: a deterministic cross-team fact
+from `lib/companyBrain.js` changed what the LLM actually wrote. The context itself is identical
+on every run and does not depend on the model.
 
 *This table is deliberately conservative. The core memory + reasoning genuinely work and reproduce in seconds; the honest gap is real-world usage, stated plainly rather than glossed over.*
 
