@@ -8,3 +8,19 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ── CACHING ──────────────────────────────────────────────────────────────
+# index.html must NEVER be cached: it's the file that points at the current
+# hashed JS bundle. If a browser holds a stale index.html it keeps loading an
+# old build forever (which is exactly how a signed-in tab ended up rendering
+# the previous version of the UI). Assets are content-hashed by Vite, so they
+# are safe to cache immutably.
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
