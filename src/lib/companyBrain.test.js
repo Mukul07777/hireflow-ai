@@ -1,5 +1,49 @@
 import { describe, it, expect } from "vitest";
-import { createCompanyBrain, normalizeName } from "./companyBrain";
+import { createCompanyBrain, normalizeName, nameSimilarity, namesLookRelated, isLikelySamePerson, levenshtein } from "./companyBrain";
+
+describe("fuzzy identity matching (messy real-world names)", () => {
+  it("computes edit distance", () => {
+    expect(levenshtein("raj", "raj")).toBe(0);
+    expect(levenshtein("raj", "raa")).toBe(1);
+  });
+
+  it("treats short forms as related when the surname matches", () => {
+    expect(namesLookRelated("Raj Patel", "Rajesh Patel")).toBe(true);
+    expect(namesLookRelated("R. Patel", "Raj Patel")).toBe(true);
+    expect(namesLookRelated("Raj Patel", "Sunita Rao")).toBe(false);
+  });
+
+  it("only merges when corroborated by company or email domain", () => {
+    expect(isLikelySamePerson(
+      { name: "Raj Patel", email: "raj@urbancart.in" },
+      { name: "Rajesh Patel", email: "rajesh@urbancart.in" })).toBe(true);
+    // same person-ish name but a different company — must NOT merge
+    expect(isLikelySamePerson(
+      { name: "Raj Patel", email: "raj@urbancart.in" },
+      { name: "Rajesh Patel", email: "rajesh@othercorp.in" })).toBe(false);
+    // different people at the same company — must NOT merge
+    expect(isLikelySamePerson(
+      { name: "Raj Patel", company: "UrbanCart" },
+      { name: "Ananya Iyer", company: "UrbanCart" })).toBe(false);
+  });
+
+  it("merges fuzzily in the graph without collapsing distinct colleagues", () => {
+    const b = createCompanyBrain();
+    b.recordEvent({ agent: "care", kind: "ticket_author", title: "t",
+      person: { name: "Raj Patel", email: "raj@urbancart.in", attrs: { company: "UrbanCart" } } });
+    b.recordEvent({ agent: "sales", kind: "lead", title: "l",
+      person: { name: "Rajesh Patel", email: "rajesh@urbancart.in", attrs: { company: "UrbanCart" } } });
+    expect(b.stats().entities).toBe(1);
+    expect(b.stats().mergedIdentities).toBe(1);
+
+    const c = createCompanyBrain();
+    c.recordEvent({ agent: "care", kind: "ticket_author", title: "t",
+      person: { name: "Raj Patel", email: "raj@urbancart.in", attrs: { company: "UrbanCart" } } });
+    c.recordEvent({ agent: "sales", kind: "lead", title: "l",
+      person: { name: "Ananya Iyer", email: "ananya@urbancart.in", attrs: { company: "UrbanCart" } } });
+    expect(c.stats().entities).toBe(2);
+  });
+});
 
 describe("normalizeName", () => {
   it("lowercases and collapses whitespace", () => {

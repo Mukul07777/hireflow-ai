@@ -47,6 +47,76 @@ function identityKey({ name, email, phone }) {
   return normEmail(email) || normPhone(phone) || normalizeName(name) || null;
 }
 
+// ── FUZZY NAME MATCHING ──────────────────────────────────────────────────────
+// Real CRM data is messy: "Raj Patel" in support, "Rajesh Patel" in sales, "R. Patel"
+// in hiring. Exact matching misses all of those, which is the difference between a demo
+// and something usable. Levenshtein distance gives a similarity ratio; we only accept a
+// fuzzy match when the names are close AND corroborated by the same company/email domain,
+// so we don't collapse two genuinely different people who happen to have similar names.
+export function levenshtein(a, b) {
+  a = a || ""; b = b || "";
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(
+        prev[j] + 1,            // deletion
+        cur[j - 1] + 1,         // insertion
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1) // substitution
+      );
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** 0..1 similarity between two names (1 = identical). */
+export function nameSimilarity(a, b) {
+  const x = normalizeName(a), y = normalizeName(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  const max = Math.max(x.length, y.length);
+  return max === 0 ? 0 : 1 - levenshtein(x, y) / max;
+}
+
+/**
+ * Token-aware name match. Raw edit distance is a poor fit for human names:
+ * "Raj Patel" vs "Rajesh Patel" scores only 0.75 because the diff is concentrated
+ * in one token. This compares surname exactly and allows a first-name that is a
+ * prefix/short form of the other ("Raj" → "Rajesh", "R." → "Raj").
+ */
+export function namesLookRelated(a, b) {
+  const clean = (s) => normalizeName(s).replace(/[.]/g, "").trim();
+  const ta = clean(a).split(" ").filter(Boolean);
+  const tb = clean(b).split(" ").filter(Boolean);
+  if (ta.length < 2 || tb.length < 2) return false;
+  if (ta[ta.length - 1] !== tb[tb.length - 1]) return false; // surname must match exactly
+  const fa = ta[0], fb = tb[0];
+  if (fa === fb) return true;
+  const short = fa.length <= fb.length ? fa : fb;
+  const long = fa.length <= fb.length ? fb : fa;
+  return short.length >= 1 && long.startsWith(short); // "raj"→"rajesh", "r"→"raj"
+}
+
+/**
+ * Do two records plausibly describe the same person?
+ * Requires BOTH a related name AND a corroborating signal (same company or email domain).
+ * Corroboration is what keeps this safe — name similarity alone is never enough.
+ */
+export function isLikelySamePerson(a, b, threshold = 0.82) {
+  const sim = nameSimilarity(a.name, b.name);
+  if (sim < threshold && !namesLookRelated(a.name, b.name)) return false;
+  const domainA = ((a.email || "").split("@")[1] || "").toLowerCase();
+  const domainB = ((b.email || "").split("@")[1] || "").toLowerCase();
+  const compA = (a.company || "").trim().toLowerCase();
+  const compB = (b.company || "").trim().toLowerCase();
+  const corroborated = (domainA && domainA === domainB) || (compA && compA === compB);
+  return Boolean(corroborated);
+}
+
 /**
  * @param {Array} seedEvents - optional persisted event log to replay on construction.
  */
@@ -59,7 +129,7 @@ export function createCompanyBrain(seedEvents = []) {
   const links = [];
 
   function resolveKey(person) {
-    // Try to find an existing entity this person maps to, across email/phone/name.
+    // Pass 1 — exact, high-confidence signals: email, then phone, then exact name.
     const email = normEmail(person.email);
     const phone = normPhone(person.phone);
     const nameKey = normalizeName(person.name);
@@ -67,6 +137,15 @@ export function createCompanyBrain(seedEvents = []) {
       if (email && e.email === email) return key;
       if (phone && e.phone === phone) return key;
       if (nameKey && e.nameKey === nameKey) return key;
+    }
+    // Pass 2 — fuzzy, but only when corroborated by the same company or email domain.
+    // Catches "Raj Patel" vs "Rajesh Patel" at the same account without merging
+    // two different people who merely have similar names.
+    const candidate = { name: person.name, email: person.email, company: person.attrs?.company };
+    for (const [key, e] of entities) {
+      if (isLikelySamePerson(candidate, { name: e.name, email: e.email, company: e.attrs?.company })) {
+        return key;
+      }
     }
     return identityKey(person);
   }
