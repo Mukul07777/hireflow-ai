@@ -438,7 +438,7 @@ async function sendWhatsAppReal(message){
 const SAMPLE_JD="Senior Frontend Engineer — Remote\n\nWe are a Bangalore-based B2B SaaS startup (Series A, 80 employees).\n\nRequirements:\n- 4+ years React + TypeScript\n- Next.js, GraphQL experience\n- System design fundamentals\n- Mentoring junior developers\n- Startup mindset\n\nCompensation: Rs 28-42 LPA + equity + fully remote";
 const SAMPLE_PRODUCT="NexFlow AI Platform\n\nAutonomous multi-agent AI for Indian SMBs. Automates hiring, sales, support, and care.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\nFree trial: 14 days, no credit card.";
 const SAMPLE_TARGET="B2B SaaS startups in India (Series A-B, 50-300 employees). CTOs struggling with scaling hiring and customer ops. Bangalore, Mumbai, Hyderabad, Delhi-NCR.";
-const SAMPLE_DOCS="NexFlow Help Center\n\nGetting Started: Sign up at flowzint.in, create workspace, choose template, paste context, run pipeline.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\n\nRefund Policy: 14-day money-back. Email support@flowzint.in.\n\nPipeline stuck: Hard refresh then restart. API errors: Settings > Integrations.\n\nData Privacy: AES-256 encryption. SOC2 Type II. Data stays in India.";
+const SAMPLE_DOCS="NexFlow Help Center\n\nGetting Started: Sign up at nexflow.in, create workspace, choose template, paste context, run pipeline.\n\nPricing: Starter Rs 999/month, Team Rs 2,999/month, Enterprise custom.\n\nRefund Policy: 14-day money-back. Email support@nexflow.in.\n\nPipeline stuck: Hard refresh then restart. API errors: Settings > Integrations.\n\nData Privacy: AES-256 encryption. SOC2 Type II. Data stays in India.";
 const SAMPLE_SMB={name:"Kirana King",type:"Retail Chain",city:"Pune",problem:"Managing 3 stores, WhatsApp orders chaotic, no CRM, losing customers to BigBasket",whatsappChats:"Hey bhai kal 10kg aata chahiye\nHi can I order ghee 2kg?\nKab milega mera order? 2 din ho gaye\nBhai price kya hai tomato ka aaj?\nOrder cancel karna hai mera"};
 
 const CANDIDATES=[
@@ -698,7 +698,7 @@ function AgentNetworkViz({crossEvents=[],onNodeClick}){
             {/* Watermark */}
             <text x={W/2} y={H/2+4} textAnchor="middle" fontSize="11" fontWeight="900"
               fill="rgba(255,255,255,0.04)" fontFamily="Inter,system-ui,sans-serif"
-              letterSpacing="4" style={{userSelect:"none"}}>FLOWZINT AI</text>
+              letterSpacing="4" style={{userSelect:"none"}}>NEXFLOW AI</text>
           </svg>
           {crossEvents.length>0&&(
             <div style={{position:"absolute",bottom:10,left:"50%",transform:"translateX(-50%)",background:"rgba(109,95,250,0.18)",border:"1px solid rgba(109,95,250,0.35)",borderRadius:20,padding:"5px 16px",whiteSpace:"nowrap",backdropFilter:"blur(6px)"}}>
@@ -3229,7 +3229,7 @@ function SalesMode(){
     }catch{
       const fallback=[
         {id:1,name:"Ananya Iyer",role:"VP Engineering",company:"UrbanCart",industry:"E-commerce",painPoint:"Manual hiring taking 3+ weeks",fitScore:92,budget:"Rs 5-10L/yr",objection:"Already using spreadsheets",email:"ananya@urbancart.in"},
-        {id:2,name:"Meera Joshi",role:"Head of HR",company:"ScaleUp",industry:"Fintech",painPoint:"No structured screening",fitScore:87,budget:"Rs 3-7L/yr",objection:"Team is small",email:"meera@scaleup.in"},
+        {id:2,name:"Priya Nair",role:"Head of HR",company:"TalentBridge",industry:"HR Tech",painPoint:"Hiring pipeline stalls, no structured screening",fitScore:87,budget:"Rs 3-7L/yr",objection:"Team is small",email:"priya@talentbridge.co"},
         {id:3,name:"Rohan Das",role:"CEO",company:"FastHire",industry:"Recruitment",painPoint:"Slow candidate evaluation",fitScore:84,budget:"Rs 8-15L/yr",objection:"Price too high",email:"rohan@fasthire.co"},
         {id:4,name:"Priti Singh",role:"Talent Manager",company:"BuildCo",industry:"Construction",painPoint:"No bias detection",fitScore:76,budget:"Rs 2-5L/yr",objection:"Need ROI first",email:"priti@buildco.in"},
         {id:5,name:"Karan Mehta",role:"CTO",company:"DevStudio",industry:"Agency",painPoint:"Inconsistent interviews",fitScore:71,budget:"Rs 3-6L/yr",objection:"Need integrations",email:"karan@devstudio.io"},
@@ -3469,7 +3469,7 @@ function SupportMode(){
         {q:"How do I get started?",a:"Sign up, create workspace, choose template, paste context, run pipeline."},
         {q:"What are the pricing plans?",a:"Starter: Rs 999/month. Team: Rs 2,999/month. Enterprise: Custom."},
         {q:"How do I cancel?",a:"Settings > Billing > Cancel Plan. Access continues until period ends."},
-        {q:"What is your refund policy?",a:"14-day money back guarantee. Email support@flowzint.in."},
+        {q:"What is your refund policy?",a:"14-day money back guarantee. Email support@nexflow.in."},
         {q:"Pipeline is stuck — what do I do?",a:"Refresh and restart. Check API key in Settings > Integrations."},
         {q:"How do I change my password?",a:"Settings > Security > Change Password."},
       ]});
@@ -5793,7 +5793,7 @@ function AuthScreen({onAuth}){
           {/* Demo bypass */}
           <div style={{borderTop:"1px solid rgba(120,95,55,0.16)",marginTop:20,paddingTop:20,textAlign:"center"}}>
             <div style={{fontSize:11,color:"#8A7B63",marginBottom:10,fontWeight:600}}>Evaluating the platform?</div>
-            <button onClick={()=>onAuth({access_token:"demo",user:{email:"demo@flowzint.ai",user_metadata:{full_name:"Demo User"}},isDemo:true})}
+            <button onClick={()=>onAuth({access_token:"demo",user:{email:"demo@nexflow.ai",user_metadata:{full_name:"Demo User"}},isDemo:true})}
               style={{width:"100%",padding:"12px",background:"linear-gradient(150deg,#0D3B4F,#1C7A93)",border:"none",borderRadius:999,color:"#F5F8F8",fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.2s",boxShadow:"0 8px 20px rgba(13,59,79,0.24)"}}>
               Try Demo — No signup needed
             </button>

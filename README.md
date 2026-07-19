@@ -57,9 +57,15 @@
 
 <div align="center">
 
-<img src="docs/screenshots/home.png" alt="NexFlow AI home — seven AI systems" width="90%"/>
+<img src="docs/screenshots/hero.png" alt="NexFlow AI — seven AI systems, one quiet platform" width="90%"/>
 
-<sub><b>Home</b> — seven AI systems. SMB Brain leads with <i>Start here</i>; Team is separated as a non-AI admin feature.</sub>
+<sub><b>Landing</b> — seven AI systems, one platform. Cream editorial UI, guided demo path, and a live agent network.</sub>
+
+<br/><br/>
+
+<img src="docs/screenshots/home.png" alt="The seven AI systems grid" width="90%"/>
+
+<sub><b>Choose your agent</b> — six agents + the Company Brain = 7 AI. SMB Brain leads with <i>Start here</i>; Team is separated below as a non-AI admin feature.</sub>
 
 <br/><br/>
 
