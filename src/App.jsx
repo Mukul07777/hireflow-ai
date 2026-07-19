@@ -914,7 +914,7 @@ function HomeScreen(){
                 initial={{opacity:0,y:20}} animate={{opacity:1,y:0}}
                 transition={{duration:0.4,delay:0.08+i*0.06}}
                 onClick={()=>dispatch({type:"SET_MODE",payload:m.id})}
-                style={{background:"#FFFDF8",borderRadius:16,border:isStart?"1.5px solid #C79A57":"1px solid rgba(120,95,55,0.14)",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:isStart?"0 10px 30px rgba(184,137,74,0.18)":"0 2px 10px rgba(120,95,55,0.05)"}}
+                style={{background:"#FFFDF8",borderRadius:16,border:isStart?"1.5px solid #C79A57":"1px solid rgba(120,95,55,0.14)",padding:"22px 22px 20px",cursor:"pointer",position:"relative",overflow:"hidden",transition:"all 0.22s ease",boxShadow:isStart?"0 10px 30px rgba(184,137,74,0.18)":"0 2px 10px rgba(120,95,55,0.05)",...(m.id==="brain"?{gridColumn:"span 2"}:{})}}
                 whileHover={{y:-5,boxShadow:`0 16px 40px ${m.glow}`,borderColor:m.color+"55"}}>
 
                 {/* Left color bar */}
@@ -4929,6 +4929,8 @@ body{font-family:Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%;}
 /* ── TABLET ── */
 @media(max-width:1100px){
   .home-grid{grid-template-columns:repeat(2,1fr)!important;}
+  .auth-shell{flex-direction:column!important;gap:28px!important;}
+  .auth-left{max-width:560px!important;flex:none!important;}
   .feature-grid{grid-template-columns:repeat(2,1fr)!important;}
   .care-grid{grid-template-columns:1fr!important;}
   .support-grid{grid-template-columns:1fr!important;}
@@ -4951,6 +4953,11 @@ body{font-family:Inter,system-ui,sans-serif;-webkit-text-size-adjust:100%;}
 
   /* Home grid */
   .home-grid{grid-template-columns:1fr!important;}
+  .home-grid > *{grid-column:span 1!important;}
+
+  /* Auth screen — stack the panels, hide the diagram column */
+  .auth-shell{flex-direction:column!important;gap:24px!important;padding:28px 16px!important;}
+  .auth-left{max-width:100%!important;flex:none!important;}
   .feature-grid{grid-template-columns:1fr!important;}
   .feature-showcase-section{padding:44px 16px 40px!important;}
   .hiring-report-grid{grid-template-columns:repeat(2,1fr)!important;}
@@ -5677,8 +5684,11 @@ function AuthScreen({onAuth}){
       <div style={{position:"absolute",top:-160,left:"18%",width:760,height:560,borderRadius:"50%",background:"radial-gradient(circle,rgba(212,178,120,0.28) 0%,transparent 68%)",pointerEvents:"none"}}/>
       <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(rgba(120,95,55,0.06) 1px,transparent 1px)",backgroundSize:"22px 22px",pointerEvents:"none",maskImage:"linear-gradient(180deg,black 0%,transparent 85%)",WebkitMaskImage:"linear-gradient(180deg,black 0%,transparent 85%)"}}/>
 
+      {/* Centered two-column shell so the panels sit together instead of drifting apart */}
+      <div style={{maxWidth:1150,width:"100%",margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"center",gap:48,padding:"48px 32px",position:"relative",zIndex:2}} className="auth-shell">
+
       {/* Left panel — branding + closed-loop diagram */}
-      <div style={{flex:1,display:"flex",flexDirection:"column",justifyContent:"center",padding:"60px 56px",position:"relative",zIndex:2}} className="auth-left">
+      <div style={{flex:"1 1 520px",maxWidth:560,display:"flex",flexDirection:"column",justifyContent:"center"}} className="auth-left">
         <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,253,248,0.85)",border:"1px solid rgba(184,137,74,0.4)",borderRadius:22,padding:"6px 16px",marginBottom:22,alignSelf:"flex-start"}}>
           <span style={{fontSize:12}}>🇮🇳</span>
           <span style={{fontSize:10.5,fontWeight:800,color:"#9A6A2E",letterSpacing:"0.03em"}}>Built for how Indian businesses actually work</span>
@@ -5687,8 +5697,15 @@ function AuthScreen({onAuth}){
         <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:44,fontWeight:800,color:"#211E19",letterSpacing:"-0.02em",lineHeight:1.05,marginBottom:14}}>
           NexFlow AI
         </div>
-        <div style={{fontSize:16.5,color:"#6B6355",lineHeight:1.7,marginBottom:30,maxWidth:460}}>
-          <b style={{color:"#3A342A"}}>Six AI agents. One shared memory.</b> Hiring, sales, support, care and SMB intelligence that finally recognise the same customer across every team.
+        <div style={{fontSize:16.5,color:"#6B6355",lineHeight:1.7,marginBottom:26,maxWidth:480}}>
+          <b style={{color:"#3A342A"}}>Seven AI systems. One shared memory.</b> Hiring, sales, support, care, SMB intelligence and a live War Room that finally recognise the same customer across every team.
+        </div>
+
+        {/* the equation, same language as the home screen */}
+        <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"rgba(255,253,248,0.9)",border:"1px solid rgba(184,137,74,0.35)",borderRadius:999,padding:"7px 16px",fontSize:12.5,fontWeight:700,color:"#3A342A",marginBottom:26,alignSelf:"flex-start"}}>
+          <span>6 agents</span><span style={{color:"#9A6A2E",fontWeight:800}}>+</span>
+          <span>the Company Brain</span><span style={{color:"#9A6A2E",fontWeight:800}}>=</span>
+          <span style={{background:"linear-gradient(100deg,#0D3B4F,#1C7A93,#B8894A)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text",fontWeight:900}}>7 AI</span>
         </div>
 
         {/* Closed-loop diagram — the whole idea in one glance */}
@@ -5718,7 +5735,7 @@ function AuthScreen({onAuth}){
       </div>
 
       {/* Right panel — auth form */}
-      <div style={{width:"100%",maxWidth:440,margin:"auto",padding:32,display:"flex",flexDirection:"column",justifyContent:"center",position:"relative",zIndex:2}}>
+      <div style={{width:"100%",maxWidth:430,flexShrink:0,display:"flex",flexDirection:"column",justifyContent:"center"}}>
         <motion.div initial={{opacity:0,y:24}} animate={{opacity:1,y:0}} transition={{duration:0.4}}
           style={{background:"#FFFDF8",border:"1px solid rgba(120,95,55,0.18)",borderRadius:20,padding:36,boxShadow:"0 18px 50px rgba(120,95,55,0.14)"}}>
 
@@ -5783,6 +5800,8 @@ function AuthScreen({onAuth}){
           </div>
         </motion.div>
       </div>
+
+      </div>{/* /auth-shell */}
     </div>
   );
 }
