@@ -10,7 +10,9 @@
 &nbsp;
 [![CI](https://img.shields.io/badge/CI-passing-2ea44f?style=for-the-badge&logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 &nbsp;
-[![Tests](https://img.shields.io/badge/unit_tests-90+_passing-2ea44f?style=for-the-badge)](src/lib)
+[![Tests](https://img.shields.io/badge/unit_tests-100+_passing-2ea44f?style=for-the-badge)](src/lib)
+&nbsp;
+[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 
 <br/>
 
@@ -34,6 +36,7 @@
 
 ## 📑 Table of Contents
 
+- [📸 Screenshots](#-screenshots)
 - [✨ The closed loop — what makes this different](#-the-closed-loop--what-makes-this-different)
 - [⚡ 90-second demo (for reviewers)](#-90-second-demo-for-reviewers)
 - [🤖 The seven systems](#-the-seven-systems)
@@ -47,6 +50,30 @@
 - [🧰 Tech stack](#-tech-stack)
 - [🚀 Local development](#-local-development)
 - [🔑 Environment variables](#-environment-variables)
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+
+<img src="docs/screenshots/home.png" alt="NexFlow AI home — seven AI systems" width="90%"/>
+
+<sub><b>Home</b> — seven AI systems. SMB Brain leads with <i>Start here</i>; Team is separated as a non-AI admin feature.</sub>
+
+<br/><br/>
+
+<img src="docs/screenshots/company-brain.png" alt="Company Brain — merged identities and next-best-actions" width="90%"/>
+
+<sub><b>Company Brain</b> — duplicate identities merged across teams, ranked next-best-actions, one-click routing.</sub>
+
+<br/><br/>
+
+<img src="docs/screenshots/closed-loop.png" alt="SalesFlow account check warning about an open support ticket" width="90%"/>
+
+<sub><b>The closed loop</b> — SalesFlow reads shared memory before drafting and warns that this account has an open support ticket.</sub>
+
+</div>
 
 ---
 
@@ -178,6 +205,7 @@ src/
     costEstimator.js          # real Groq-pricing cost estimation ............ unit tested
     companyBrain.js           # 🧩 shared cross-agent memory engine .......... unit tested, wired into Sales/Care
     brainContext.js           # read-side of the loop (person + account) ..... unit tested
+    modeAccess.js             # role → visible modes, fail-open by design .... unit tested
 scripts/
   benchmark-resume-parsing.mjs  # node scripts/benchmark-resume-parsing.mjs
   brain-scenario.mjs            # node scripts/brain-scenario.mjs — reproducible closed-loop proof
@@ -227,12 +255,12 @@ This app stores names, emails, salaries, and phone numbers — personal data und
 ## 🧪 Testing & CI
 
 ```bash
-npm test                              # 9 Vitest suites, 90+ unit tests
+npm test                              # 10 Vitest suites, 100+ unit tests
 node scripts/brain-scenario.mjs       # reproducible closed-loop proof (2s, no browser)
 node scripts/benchmark-resume-parsing.mjs   # measured local throughput
 ```
 
-`npm test` covers Groq key rotation, resume batch-parsing, India compliance rules, PAN/GSTIN/Udyam verification, outcome learning, cost estimation, **the Company Brain engine** (identity resolution, insight determinism, seed replay), **the Brain-context read layer** (`brainContext.test.js` — person- and account-level memory Sales/Care read before drafting), and the Supabase helpers' fallback behavior. **GitHub Actions** runs the suite + a production build on every push and PR.
+`npm test` covers Groq key rotation, resume batch-parsing, India compliance rules, PAN/GSTIN/Udyam verification, outcome learning, cost estimation, **the Company Brain engine** (identity resolution, insight determinism, seed replay), **the Brain-context read layer** (`brainContext.test.js` — person- and account-level memory Sales/Care read before drafting), **role-based mode access** (`modeAccess.test.js` — a regression guard proving that signing in never removes features), and the Supabase helpers' fallback behavior. **GitHub Actions** runs the suite + a production build on every push and PR.
 
 > **Prove the closed loop in 2 seconds, no browser:** `node scripts/brain-scenario.mjs` runs a fixed, labeled scenario through the exact engine the app uses and prints the merged identities + deterministic next-best-actions. Same output every run — reproducible, not a demo trick.
 

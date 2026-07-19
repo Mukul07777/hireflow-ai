@@ -7,6 +7,20 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') }
   },
+  build: {
+    // Split vendor libraries out of the app bundle so the main chunk stays small
+    // and third-party code caches separately across deploys.
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom'],
+          motion: ['framer-motion'],
+          charts: ['recharts'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 700,
+  },
   test: {
     environment: 'node',
     globals: false,

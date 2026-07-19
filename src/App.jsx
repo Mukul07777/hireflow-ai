@@ -35,27 +35,15 @@ import { createKeyRotator } from "./lib/groqKeyRotation.js";
 import { runIndiaComplianceCheck, formatComplianceFlags } from "./lib/indiaComplianceRules.js";
 import { estimatePipelineCost } from "./lib/costEstimator.js";
 import { createCompanyBrain } from "./lib/companyBrain.js";
+import { modeAllowedForRole, ROLE_MODE_ACCESS } from "./lib/modeAccess.js";
 import { brainContextFor, salesAccountIntel } from "./lib/brainContext.js";
 import { createOutcomeLearner } from "./lib/outcomeLearning.js";
 
 // ── ROLE PERMISSIONS ────────────────────────────────────────────────────
-// Which app modes each employee role can see. Admin sees everything.
-// This is the UI-layer half of the access boundary; the RLS policies in
-// supabase_multitenancy.sql are the real, enforced half — this mapping
-// alone would not stop a determined user, it just keeps the nav honest
-// for the role someone actually has.
-const ROLE_MODE_ACCESS = {
-  admin: ["hiring", "sales", "support", "care", "smb", "warroom", "brain", "team"],
-  hiring_manager: ["hiring", "smb", "brain"],
-  sales_rep: ["sales", "smb", "brain"],
-  support_agent: ["support", "smb", "brain"],
-  care_agent: ["care", "smb", "brain"],
-};
-function modeAllowedForRole(modeId, role) {
-  if (!role) return true; // no employee record yet (e.g. demo mode) — don't block
-  const allowed = ROLE_MODE_ACCESS[role];
-  return allowed ? allowed.includes(modeId) : true;
-}
+// ROLE_MODE_ACCESS + modeAllowedForRole live in lib/modeAccess.js — fail-open by
+// design and unit-tested (modeAccess.test.js), so "signing in removes features"
+// can never regress silently. RLS in supabase/04_multitenancy.sql is the real,
+// enforced boundary; this mapping only keeps the nav honest.
 
 // ── EMAILJS ───────────────────────────────────────────────────────────────
 const EJS={svc:"service_f5hfgxa",tpl:"template_kcl0nki",key:"Yu7ThCT-UB7Kn7uc1"};
